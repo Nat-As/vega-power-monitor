@@ -1,0 +1,2071 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vega Power Monitor</title>
+<style>
+:root, :root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #151b23; --panel2: #1b222c; --border: #2a323d; --text: #e6edf3; --muted: #8b949e;
+  --accent: #4cb3ff; --accent-dim: #1f6feb33; --ok: #3fb950; --warn: #d29922; --err: #f85149;
+  --plot-bg: #0a0d12; --grid: #1f2731; --axis: #8b949e; --trace: #4cb3ff; --trace2: #f0883e; --mean: #a371f7;
+  --input: #0d1117;
+}
+:root[data-theme="light"] {
+  --bg: #f3f5f8; --panel: #ffffff; --panel2: #f6f8fa; --border: #d0d7de; --text: #1f2328; --muted: #59636e;
+  --accent: #0969da; --accent-dim: #0969da22; --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
+  --plot-bg: #ffffff; --grid: #e6e9ed; --axis: #59636e; --trace: #0969da; --trace2: #bc4c00; --mean: #8250df;
+  --input: #ffffff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+/* ---------- header ---------- */
+header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 8px 14px; }
+.titlebar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.titlebar h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+.led { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); display: inline-block; box-shadow: 0 0 0 2px var(--panel2); }
+.led.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.led.busy { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.led.err { background: var(--err); box-shadow: 0 0 8px var(--err); }
+#statusText { color: var(--muted); }
+.spacer { flex: 1; }
+.infogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-top: 8px; }
+.infogrid .info { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; min-width: 0; }
+.infogrid .info .k { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.infogrid .info .v { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- layout ---------- */
+.layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); height: calc(100% - var(--hdr, 110px)); }
+aside { border-right: 1px solid var(--border); overflow-y: auto; background: var(--panel); }
+main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px; gap: 10px; overflow: auto; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; height: auto; }
+  aside { border-right: none; border-bottom: 1px solid var(--border); max-height: none; }
+  main { overflow: visible; }
+  .plotwrap { min-height: 320px; }
+}
+
+details.sec { border-bottom: 1px solid var(--border); }
+details.sec > summary { cursor: pointer; padding: 9px 14px; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 8px; user-select: none; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: "▸"; color: var(--muted); transition: transform .15s; display: inline-block; width: 10px; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+details.sec > summary .tag { margin-left: auto; font-weight: 400; color: var(--muted); font-size: 11px; }
+.secbody { padding: 2px 14px 12px; display: grid; gap: 8px; }
+
+.row { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 8px; }
+.row > label:first-child { color: var(--muted); }
+.row.full { grid-template-columns: 1fr; }
+.inline { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.inline > * { min-width: 0; }
+.grow { flex: 1; }
+input[type=text], input[type=number], select {
+  background: var(--input); border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px; width: 100%; min-width: 0;
+}
+input[type=number] { font-variant-numeric: tabular-nums; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+select:disabled, input:disabled, button:disabled { opacity: .45; cursor: not-allowed; }
+button {
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 5px; padding: 4px 10px; cursor: pointer; white-space: nowrap;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { color: var(--err); }
+button.active { background: var(--accent-dim); border-color: var(--accent); }
+button.sm { padding: 2px 7px; font-size: 12px; }
+.btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
+.btnrow > button { flex: 1; }
+.chk { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.hint { color: var(--muted); font-size: 11.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { padding: 1px 7px; font-size: 11.5px; border-radius: 10px; }
+.unsupported { color: var(--muted); font-style: italic; font-size: 11.5px; }
+
+/* ---------- readout ---------- */
+.toprow { display: grid; grid-template-columns: minmax(280px, 1.1fr) minmax(0, 1fr); gap: 10px; }
+@media (max-width: 1150px) { .toprow { grid-template-columns: 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.readout { display: flex; flex-direction: column; gap: 4px; }
+.readout .lbl { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+.bigval { font-size: clamp(34px, 5vw, 56px); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; }
+.bigval.alarm { color: var(--err); }
+.bigval.over { color: var(--warn); }
+.subval { color: var(--muted); font-variant-numeric: tabular-nums; }
+.rangebar { position: relative; height: 10px; border-radius: 5px; background: var(--panel2); border: 1px solid var(--border); overflow: hidden; margin-top: 4px; }
+.rangebar > div { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--accent); transition: width .15s; }
+.rangebar > div.hot { background: var(--warn); }
+.rangebar > div.full { background: var(--err); }
+.rangelbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.alarmbadge { display: none; color: #fff; background: var(--err); border-radius: 4px; padding: 0 6px; font-size: 11px; font-weight: 600; }
+.alarmbadge.show { display: inline-block; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+.stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.stat .v { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- plot ---------- */
+.plotcard { display: flex; flex-direction: column; flex: 1; min-height: 300px; padding: 8px; }
+.plottools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 0 2px 6px; }
+.plottools .sep { width: 1px; height: 18px; background: var(--border); }
+.plotwrap { position: relative; flex: 1; min-height: 240px; }
+#plot { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 6px; cursor: crosshair; }
+
+/* ---------- console ---------- */
+.console { display: flex; flex-direction: column; gap: 6px; }
+#log { height: 170px; overflow-y: auto; background: var(--plot-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+#log .tx { color: var(--accent); }
+#log .rx { color: var(--ok); }
+#log .err { color: var(--err); }
+#log .info { color: var(--muted); }
+#log .warn { color: var(--warn); }
+#log .ts { color: var(--muted); opacity: .7; }
+
+.banner { display: none; background: var(--err); color: #fff; padding: 8px 14px; font-weight: 500; }
+.banner.show { display: block; }
+.toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel2); border: 1px solid var(--border); border-left: 4px solid var(--accent); padding: 8px 12px; border-radius: 6px; max-width: min(420px, calc(100vw - 32px)); box-shadow: 0 6px 24px #0006; opacity: 0; transform: translateY(8px); transition: .2s; pointer-events: none; z-index: 10; }
+.toast.show { opacity: 1; transform: none; }
+.toast.err { border-left-color: var(--err); }
+kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; font-size: 11px; background: var(--panel2); }
+</style>
+</head>
+<body>
+
+<div id="nosupport" class="banner">Web Serial is not available in this browser. Use Chrome or Edge (desktop) and open this page from <span class="mono">http://localhost</span>, <span class="mono">https://</span> or a local file. Simulation mode still works.</div>
+
+<header id="hdr">
+  <div class="titlebar">
+    <span id="led" class="led" title="Connection status"></span>
+    <h1>Ophir Vega · Optical Power Monitor</h1>
+    <span id="statusText">Disconnected</span>
+    <span class="spacer"></span>
+    <span class="hint"><kbd>Space</kbd> start/stop · <kbd>P</kbd> pause plot · <kbd>R</kbd> reset stats · <kbd>Z</kbd> zero ref</span>
+  </div>
+  <div class="infogrid" id="infogrid">
+    <div class="info"><div class="k">Instrument</div><div class="v" id="i_inst">—</div></div>
+    <div class="info"><div class="k">Instrument S/N</div><div class="v mono" id="i_isn">—</div></div>
+    <div class="info"><div class="k">Firmware</div><div class="v mono" id="i_fw">—</div></div>
+    <div class="info"><div class="k">Sensor head</div><div class="v" id="i_head">—</div></div>
+    <div class="info"><div class="k">Head S/N</div><div class="v mono" id="i_hsn">—</div></div>
+    <div class="info"><div class="k">Head type</div><div class="v" id="i_htype">—</div></div>
+    <div class="info"><div class="k">Head capabilities</div><div class="v mono" id="i_hcap">—</div></div>
+    <div class="info"><div class="k">Units / Mode</div><div class="v" id="i_units">—</div></div>
+    <div class="info"><div class="k">Wavelength</div><div class="v" id="i_wl">—</div></div>
+    <div class="info"><div class="k">Range</div><div class="v" id="i_range">—</div></div>
+    <div class="info"><div class="k">Averaging</div><div class="v" id="i_avg">—</div></div>
+    <div class="info"><div class="k">Port</div><div class="v mono" id="i_port">—</div></div>
+  </div>
+</header>
+
+<div class="layout">
+<aside>
+
+  <!-- ===================== CONNECTION ===================== -->
+  <details class="sec" open>
+    <summary>Connection <span class="tag" id="connTag">offline</span></summary>
+    <div class="secbody">
+      <div class="row">
+        <label for="portSel">COM port</label>
+        <div class="inline">
+          <select id="portSel" class="grow"></select>
+          <button id="btnPortRefresh" class="sm" title="Refresh list of authorized ports">⟳</button>
+          <button id="btnPortForget" class="sm" title="Revoke browser permission for the selected port">✕</button>
+        </div>
+      </div>
+      <div class="row">
+        <label for="baud">Baud rate</label>
+        <div class="inline">
+          <select id="baud" class="grow">
+            <option>1200</option><option>2400</option><option>4800</option><option selected>9600</option>
+            <option>19200</option><option>38400</option><option>57600</option><option>115200</option>
+          </select>
+          <button id="btnAutoBaud" class="sm" title="Try each baud rate and query $II">Auto‑detect</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Data·Parity·Stop</label>
+        <div class="inline">
+          <select id="dataBits" title="Data bits"><option>8</option><option>7</option></select>
+          <select id="parity" title="Parity"><option value="none">N</option><option value="even">E</option><option value="odd">O</option></select>
+          <select id="stopBits" title="Stop bits"><option>1</option><option>2</option></select>
+        </div>
+      </div>
+      <div class="row">
+        <label for="flow">Flow control</label>
+        <select id="flow"><option value="none">None</option><option value="hardware">Hardware (RTS/CTS)</option></select>
+      </div>
+      <div class="row">
+        <label for="term">Line terminator</label>
+        <select id="term"><option value="\r">CR (\r)</option><option value="\r\n">CR+LF (\r\n)</option><option value="\n">LF (\n)</option></select>
+      </div>
+      <div class="row">
+        <label for="timeout">Reply timeout</label>
+        <div class="inline"><input type="number" id="timeout" min="100" max="10000" step="100" value="1000"><span class="hint">ms</span></div>
+      </div>
+      <div class="row">
+        <label>Control lines</label>
+        <div class="inline">
+          <label class="chk"><input type="checkbox" id="dtr" checked> DTR</label>
+          <label class="chk"><input type="checkbox" id="rts" checked> RTS</label>
+        </div>
+      </div>
+      <label class="chk"><input type="checkbox" id="autoStart" checked> Start acquisition after connecting</label>
+      <label class="chk"><input type="checkbox" id="simMode"> Simulation mode (no hardware)</label>
+      <div class="btnrow">
+        <button id="btnConnect" class="primary">Connect</button>
+        <button id="btnDisconnect" disabled>Disconnect</button>
+      </div>
+      <div class="hint">The Vega's RS232 port talks 8‑N‑1 with no flow control. Pick the same baud rate as the meter's setup menu (Setup → RS232 baud rate) or use Auto‑detect.</div>
+    </div>
+  </details>
+
+  <!-- ===================== ACQUISITION ===================== -->
+  <details class="sec" open>
+    <summary>Acquisition <span class="tag" id="acqTag">stopped</span></summary>
+    <div class="secbody">
+      <div class="btnrow">
+        <button id="btnStart" class="primary" disabled>▶ Start</button>
+        <button id="btnStop" disabled>■ Stop</button>
+        <button id="btnSingle" disabled title="Take one reading">Single</button>
+      </div>
+      <div class="row">
+        <label for="pollMs">Poll interval</label>
+        <div class="inline"><input type="range" id="pollRange" min="20" max="2000" step="10" value="200" class="grow"><input type="number" id="pollMs" min="20" max="60000" step="10" value="200" style="width:76px"><span class="hint">ms</span></div>
+      </div>
+      <div class="row">
+        <label>Measure</label>
+        <div class="inline">
+          <label class="chk"><input type="radio" name="mtype" value="power" checked> Power</label>
+          <label class="chk"><input type="radio" name="mtype" value="energy"> Energy</label>
+        </div>
+      </div>
+      <div class="row">
+        <label for="selMM">Meas. mode</label>
+        <div id="wrapMM"><select id="selMM" disabled><option>—</option></select></div>
+      </div>
+      <div class="row">
+        <label>Live rate</label>
+        <div class="mono" id="rateTxt">—</div>
+      </div>
+      <div class="row">
+        <label>Comm errors</label>
+        <div class="inline"><span class="mono" id="errTxt">0</span><button id="btnErrReset" class="sm">reset</button></div>
+      </div>
+    </div>
+  </details>
+
+  <!-- ===================== SENSOR SETTINGS ===================== -->
+  <details class="sec" open>
+    <summary>Sensor settings <span class="tag"><button id="btnRefresh" class="sm" disabled title="Re-read all settings from the meter">⟳ Read</button></span></summary>
+    <div class="secbody">
+      <div class="row">
+        <label>Wavelength</label>
+        <div id="wlWrap" class="unsupported">Connect to read wavelengths</div>
+      </div>
+      <div class="row" id="wlContRow" style="display:none">
+        <label for="wlInput">Set λ (nm)</label>
+        <div class="inline">
+          <input type="number" id="wlInput" step="1" class="grow">
+          <button id="btnWlSet" class="sm">Set</button>
+        </div>
+      </div>
+      <div class="row full" id="wlChipsRow" style="display:none">
+        <div class="chips" id="wlChips"></div>
+      </div>
+
+      <div class="row">
+        <label for="selRange">Range</label>
+        <div class="inline">
+          <select id="selRange" class="grow" disabled><option>—</option></select>
+          <button id="btnRangeUp" class="sm" title="Higher range" disabled>▲</button>
+          <button id="btnRangeDn" class="sm" title="Lower range" disabled>▼</button>
+          <button id="btnRangeAuto" class="sm" title="Autorange" disabled>Auto</button>
+        </div>
+      </div>
+      <div class="row">
+        <label for="selAvg">Averaging</label>
+        <div><select id="selAvg" disabled><option>—</option></select></div>
+      </div>
+      <div class="row">
+        <label for="selFilter">Filter</label>
+        <div><select id="selFilter" disabled><option>—</option></select></div>
+      </div>
+      <div class="row">
+        <label for="selDiffuser">Diffuser</label>
+        <div><select id="selDiffuser" disabled><option>—</option></select></div>
+      </div>
+      <div class="row">
+        <label for="selET">Energy threshold</label>
+        <div><select id="selET" disabled><option>—</option></select></div>
+      </div>
+      <div class="row">
+        <label for="selPL">Pulse length</label>
+        <div><select id="selPL" disabled><option>—</option></select></div>
+      </div>
+      <div class="row">
+        <label>Zero offset</label>
+        <div class="btnrow">
+          <button id="btnZero" class="sm" disabled title="$ZE: start zeroing (block all light first)">Start</button>
+          <button id="btnZeroQ" class="sm" disabled title="$ZQ: query zeroing status">Status</button>
+          <button id="btnZeroS" class="sm" disabled title="$ZS: save zero">Save</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Instrument</label>
+        <div class="btnrow">
+          <button id="btnReinfo" class="sm" disabled title="Re-read instrument and head info">Re‑read info</button>
+          <button id="btnReset" class="sm danger" disabled title="$RE: soft reset the meter">Reset meter</button>
+        </div>
+      </div>
+      <div class="hint">Settings that the connected head does not support are disabled automatically.</div>
+    </div>
+  </details>
+
+  <!-- ===================== DISPLAY ===================== -->
+  <details class="sec">
+    <summary>Display &amp; plot</summary>
+    <div class="secbody">
+      <div class="row">
+        <label for="displayMode">Display as</label>
+        <select id="displayMode">
+          <option value="abs">Absolute (W / J)</option>
+          <option value="dbm">dBm (dB re 1 mW / mJ)</option>
+          <option value="relpct">% of reference</option>
+          <option value="reldb">dB relative to reference</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="fixedPrefix">Unit prefix</label>
+        <select id="fixedPrefix">
+          <option value="auto">Auto</option><option value="">W (none)</option><option value="m">m (milli)</option>
+          <option value="µ">µ (micro)</option><option value="n">n (nano)</option><option value="p">p (pico)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="digits">Sig. digits</label>
+        <div class="inline"><input type="range" id="digitsRange" min="2" max="7" value="4" class="grow"><span id="digitsTxt" class="mono" style="width:16px">4</span></div>
+      </div>
+      <div class="row">
+        <label for="attDb">Ext. attenuator</label>
+        <div class="inline"><input type="number" id="attDb" step="0.1" value="0"><span class="hint">dB</span></div>
+      </div>
+      <div class="row">
+        <label for="calFactor">Cal. factor</label>
+        <div class="inline"><input type="number" id="calFactor" step="0.001" value="1"><span class="hint">×</span></div>
+      </div>
+      <div class="row">
+        <label for="smoothN">Moving avg</label>
+        <div class="inline"><input type="number" id="smoothN" min="1" max="1000" value="1"><span class="hint">samples (software)</span></div>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);width:100%;margin:2px 0">
+      <div class="row">
+        <label for="windowSec">Time window</label>
+        <select id="windowSec">
+          <option value="10">10 s</option><option value="30">30 s</option><option value="60" selected>1 min</option>
+          <option value="300">5 min</option><option value="600">10 min</option><option value="1800">30 min</option>
+          <option value="3600">1 h</option><option value="0">All data</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="yMode">Y axis</label>
+        <select id="yMode">
+          <option value="auto">Autoscale</option>
+          <option value="expand">Autoscale (expand only)</option>
+          <option value="zero">Autoscale from zero</option>
+          <option value="manual">Manual</option>
+        </select>
+      </div>
+      <div class="row" id="yManualRow">
+        <label>Y min / max</label>
+        <div class="inline"><input type="text" id="yMin" placeholder="e.g. 0" class="mono"><input type="text" id="yMax" placeholder="e.g. 2.5m" class="mono"></div>
+      </div>
+      <div class="row">
+        <label for="xLabels">X axis</label>
+        <select id="xLabels"><option value="rel">Seconds ago</option><option value="elapsed">Elapsed time</option><option value="clock">Clock time</option></select>
+      </div>
+      <div class="row">
+        <label for="lineWidth">Line width</label>
+        <input type="range" id="lineWidth" min="0.5" max="4" step="0.5" value="1.5">
+      </div>
+      <div class="row">
+        <label>Overlays</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px">
+          <label class="chk"><input type="checkbox" id="logScale"> Log Y</label>
+          <label class="chk"><input type="checkbox" id="showGrid" checked> Grid</label>
+          <label class="chk"><input type="checkbox" id="showMean" checked> Mean</label>
+          <label class="chk"><input type="checkbox" id="showSigma"> ±1σ band</label>
+          <label class="chk"><input type="checkbox" id="showPoints"> Points</label>
+          <label class="chk"><input type="checkbox" id="showSmooth"> Smoothed</label>
+          <label class="chk"><input type="checkbox" id="showFill"> Area fill</label>
+          <label class="chk"><input type="checkbox" id="showAlarmLines" checked> Alarm lines</label>
+        </div>
+      </div>
+      <div class="row">
+        <label for="maxPts">Max stored pts</label>
+        <input type="number" id="maxPts" min="1000" max="5000000" step="1000" value="200000">
+      </div>
+      <div class="row">
+        <label for="theme">Theme</label>
+        <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select>
+      </div>
+    </div>
+  </details>
+
+  <!-- ===================== REFERENCE & ALARMS ===================== -->
+  <details class="sec">
+    <summary>Reference &amp; alarms</summary>
+    <div class="secbody">
+      <div class="row">
+        <label>Reference</label>
+        <div class="mono" id="refTxt">none</div>
+      </div>
+      <div class="btnrow">
+        <button id="btnRefCur" class="sm">Ref = current</button>
+        <button id="btnRefMean" class="sm">Ref = mean</button>
+        <button id="btnRefClr" class="sm">Clear</button>
+      </div>
+      <div class="row">
+        <label for="refManual">Manual ref</label>
+        <div class="inline"><input type="text" id="refManual" class="mono" placeholder="e.g. 1.5m"><button id="btnRefSet" class="sm">Set</button></div>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);width:100%;margin:2px 0">
+      <label class="chk"><input type="checkbox" id="alarmEn"> Enable alarm limits</label>
+      <div class="row">
+        <label for="alarmLo">Low limit</label>
+        <input type="text" id="alarmLo" class="mono" placeholder="e.g. 900u">
+      </div>
+      <div class="row">
+        <label for="alarmHi">High limit</label>
+        <input type="text" id="alarmHi" class="mono" placeholder="e.g. 1.5m">
+      </div>
+      <label class="chk"><input type="checkbox" id="alarmBeep"> Audible beep on alarm</label>
+      <div class="hint">Limits are in watts (or joules) and accept SI suffixes: p n u µ m k.</div>
+    </div>
+  </details>
+
+  <!-- ===================== DATA ===================== -->
+  <details class="sec">
+    <summary>Data &amp; export <span class="tag" id="ptsTag">0 pts</span></summary>
+    <div class="secbody">
+      <div class="row">
+        <label for="sessionLabel">Session label</label>
+        <input type="text" id="sessionLabel" placeholder="e.g. 1064nm alignment run 3">
+      </div>
+      <label class="chk"><input type="checkbox" id="exportVisible"> Export only the visible time window</label>
+      <div class="btnrow">
+        <button id="btnCsv">Export CSV</button>
+        <button id="btnJson">Export JSON</button>
+        <button id="btnPng">Save plot PNG</button>
+      </div>
+      <button id="btnClear" class="danger">Clear all data</button>
+    </div>
+  </details>
+</aside>
+
+<main>
+  <div class="toprow">
+    <div class="card readout">
+      <div class="lbl"><span id="readLbl">Power</span><span><span id="alarmBadge" class="alarmbadge">ALARM</span> <span id="readAge"></span></span></div>
+      <div class="bigval mono" id="bigVal">—</div>
+      <div class="subval mono" id="subVal">&nbsp;</div>
+      <div class="rangebar" title="Reading as a fraction of the selected range's full scale"><div id="rangeFill"></div></div>
+      <div class="rangelbl"><span>0</span><span id="rangePct">—</span><span id="rangeFs">full scale —</span></div>
+    </div>
+    <div class="card">
+      <div class="inline" style="justify-content:space-between;margin-bottom:6px">
+        <span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px">Statistics <span id="statsScope">(since reset)</span></span>
+        <div class="inline">
+          <select id="statsSrc" class="sm" style="width:auto;padding:1px 4px"><option value="all">Since reset</option><option value="vis">Visible window</option></select>
+          <button id="btnStatsReset" class="sm">Reset</button>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="k">Mean</div><div class="v" id="s_mean">—</div></div>
+        <div class="stat"><div class="k">Std dev (σ)</div><div class="v" id="s_std">—</div></div>
+        <div class="stat"><div class="k">Min</div><div class="v" id="s_min">—</div></div>
+        <div class="stat"><div class="k">Max</div><div class="v" id="s_max">—</div></div>
+        <div class="stat"><div class="k">Peak‑peak</div><div class="v" id="s_pp">—</div></div>
+        <div class="stat"><div class="k">Stability σ/μ</div><div class="v" id="s_stab">—</div></div>
+        <div class="stat"><div class="k">P‑P / mean</div><div class="v" id="s_ppm">—</div></div>
+        <div class="stat"><div class="k">Samples</div><div class="v" id="s_n">0</div></div>
+        <div class="stat"><div class="k">Duration</div><div class="v" id="s_dur">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card plotcard">
+    <div class="plottools">
+      <button id="btnPause" class="sm" title="Freeze the plot (acquisition continues)">❚❚ Pause plot</button>
+      <button id="btnAutoscale" class="sm" title="Reset autoscale (double-click plot)">⤢ Rescale</button>
+      <span class="sep"></span>
+      <span class="hint">Window:</span>
+      <button class="sm wq" data-w="10">10s</button>
+      <button class="sm wq" data-w="60">1m</button>
+      <button class="sm wq" data-w="300">5m</button>
+      <button class="sm wq" data-w="1800">30m</button>
+      <button class="sm wq" data-w="0">All</button>
+      <span class="sep"></span>
+      <span class="hint" id="plotHint">Wheel: zoom time · Shift+wheel: zoom Y · Double‑click: rescale</span>
+    </div>
+    <div class="plotwrap"><canvas id="plot"></canvas></div>
+  </div>
+
+  <details class="card" open>
+    <summary style="cursor:pointer;font-weight:600">Command console</summary>
+    <div class="console" style="margin-top:6px">
+      <div id="log" class="mono" aria-live="polite"></div>
+      <div class="inline">
+        <input type="text" id="cmdIn" class="mono grow" placeholder="$II   (↑/↓ history; $ prefix added automatically)" autocomplete="off" spellcheck="false">
+        <button id="btnSend" disabled>Send</button>
+      </div>
+      <div class="inline" style="flex-wrap:wrap;justify-content:space-between">
+        <div class="chips" id="quickCmds"></div>
+        <div class="inline">
+          <label class="chk"><input type="checkbox" id="logPoll"> Log poll traffic</label>
+          <label class="chk"><input type="checkbox" id="logScroll" checked> Autoscroll</label>
+          <button id="btnLogClear" class="sm">Clear</button>
+        </div>
+      </div>
+    </div>
+  </details>
+</main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   Utilities
+   ===================================================================== */
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+const PREFIXES = [[1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p'], [1e-15, 'f']];
+const PREFIX_MUL = { k: 1e3, '': 1, m: 1e-3, u: 1e-6, 'µ': 1e-6, 'μ': 1e-6, n: 1e-9, p: 1e-12, f: 1e-15, M: 1e6 };
+
+function toSig(x, sig) {
+  if (x === 0) return (0).toFixed(Math.max(0, sig - 1));
+  const mag = Math.floor(Math.log10(Math.abs(x)));
+  const dec = clamp(sig - 1 - mag, 0, 12);
+  return x.toFixed(dec);
+}
+/** Format a value with an SI prefix: 0.00123 W -> "1.230 mW" */
+function fmtSI(v, unit = 'W', sig = 4, fixed = 'auto') {
+  if (v == null || !isFinite(v)) return '—';
+  let p;
+  if (fixed !== 'auto') p = PREFIXES.find((x) => x[1] === fixed) || [1, ''];
+  else if (v === 0) p = [1, ''];
+  else {
+    const a = Math.abs(v);
+    p = PREFIXES.find((x) => a >= x[0] * (1 - 5 * Math.pow(10, -sig))) || PREFIXES[PREFIXES.length - 1];
+  }
+  return toSig(v / p[0], sig) + ' ' + p[1] + unit;
+}
+/** Parse "1.5m", "300uW", "2e-3", "30.0mW" -> number (base units) */
+function parseSI(s) {
+  if (s == null) return NaN;
+  const m = String(s).trim().match(/^([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*([kmunpfMµμ]?)\s*(?:W|J|A|V)?\s*$/);
+  if (!m) return NaN;
+  return parseFloat(m[1]) * (PREFIX_MUL[m[2]] ?? 1);
+}
+function fmtDur(sec) {
+  if (!isFinite(sec)) return '—';
+  sec = Math.max(0, sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m) return `${m}m ${s.toFixed(0).padStart(2, '0')}s`;
+  return `${s.toFixed(1)} s`;
+}
+function toast(msg, isErr = false) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => (t.className = 'toast'), isErr ? 5000 : 2500);
+}
+function download(name, content, type) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/* =====================================================================
+   Console log
+   ===================================================================== */
+const LOG_MAX = 1500;
+function log(kind, text) {
+  const el = $('log');
+  const line = document.createElement('div');
+  const d = new Date();
+  const ts = d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  const arrow = { tx: '→', rx: '←', err: '✖', info: '·', warn: '!' }[kind] || '·';
+  line.innerHTML = `<span class="ts">${ts}</span> <span class="${kind}">${arrow} </span>`;
+  const span = document.createElement('span');
+  span.className = kind;
+  span.textContent = text;
+  line.appendChild(span);
+  el.appendChild(line);
+  while (el.childNodes.length > LOG_MAX) el.removeChild(el.firstChild);
+  if ($('logScroll').checked) el.scrollTop = el.scrollHeight;
+}
+
+/* =====================================================================
+   Transports: real Web Serial and a simulated Vega
+   ===================================================================== */
+class SerialTransport {
+  constructor(port) { this.port = port; this.onLine = null; this.onClosed = null; this.reader = null; this.closing = false; this.buf = ''; }
+  async open(opts) {
+    await this.port.open(opts);
+    this.closing = false;
+    this.loop = this._readLoop();
+  }
+  async setSignals(sig) { try { await this.port.setSignals(sig); } catch (e) { log('warn', 'setSignals failed: ' + e.message); } }
+  async _readLoop() {
+    const dec = new TextDecoder();
+    while (this.port.readable && !this.closing) {
+      this.reader = this.port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await this.reader.read();
+          if (done) break;
+          this.buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = this.buf.search(/[\r\n]/)) >= 0) {
+            const line = this.buf.slice(0, i).trim();
+            this.buf = this.buf.slice(i + 1);
+            if (line) this.onLine?.(line);
+          }
+          if (this.buf.length > 4096) this.buf = this.buf.slice(-1024); // runaway garbage guard
+        }
+      } catch (e) {
+        if (!this.closing) log('warn', 'Serial read error: ' + e.message); // framing/parity/break errors are recoverable
+      } finally {
+        try { this.reader.releaseLock(); } catch {}
+        this.reader = null;
+      }
+    }
+    if (!this.closing) this.onClosed?.();
+  }
+  async write(str) {
+    if (!this.port.writable) throw new Error('Port not writable');
+    const w = this.port.writable.getWriter();
+    try { await w.write(new TextEncoder().encode(str)); } finally { w.releaseLock(); }
+  }
+  async close() {
+    this.closing = true;
+    try { await this.reader?.cancel(); } catch {}
+    try { await this.loop; } catch {}
+    try { await this.port.close(); } catch {}
+  }
+}
+
+/** Simulates an Ophir Vega with a PD300-style photodiode head. Useful for trying out the UI. */
+class SimTransport {
+  constructor() {
+    this.onLine = null; this.onClosed = null;
+    this.s = {
+      favs: [633, 1064, 532, 'NONE', 'NONE', 'NONE'], wi: 1, range: -1, aq: 1, fq: 1,
+      mode: 'power', zeroUntil: 0, zeroDone: false, lastPulse: 0, t0: performance.now(),
+    };
+    this.ranges = ['3.00mW', '300uW', '30.0uW', '3.00uW', '300nW'];
+    this.eranges = ['2.00mJ', '200uJ', '20.0uJ'];
+  }
+  async open() {}
+  async setSignals() {}
+  async close() {}
+  async write(str) {
+    const c = str.trim();
+    if (!c) return;
+    setTimeout(() => { const r = this._respond(c); if (r != null) this.onLine?.(r); }, 8 + Math.random() * 25);
+  }
+  _wl() { return this.s.favs[this.s.wi - 1]; }
+  _power() {
+    const s = this.s, t = (performance.now() - s.t0) / 1000;
+    const wl = +this._wl() || 633;
+    const resp = Math.exp(-Math.pow((wl - 700) / 900, 2)); // pretend spectral mismatch
+    const noise = [0.02, 0.008, 0.004, 0.002, 0.0008, 0.0004][s.aq - 1] ?? 0.01;
+    const randn = () => Math.sqrt(-2 * Math.log(Math.random() || 1e-9)) * Math.cos(2 * Math.PI * Math.random());
+    let p = 1.2e-3 * resp * (1 + 0.03 * Math.sin(t / 7) + 0.01 * Math.sin(t * 1.3) + noise * randn());
+    if (s.fq === 2) p *= 1; // filter IN: calibrated by meter, same reading
+    if (s.zeroDone) p -= 2e-9;
+    return p;
+  }
+  _respond(c) {
+    const s = this.s;
+    const [op0, ...args] = c.replace(/^\$/, '').split(/\s+/);
+    const op = op0.toUpperCase();
+    const a0 = args.length ? parseInt(args[0], 10) : null;
+    switch (op) {
+      case 'II': return '*VEGA 712345 VEGA';
+      case 'VE': return '*VEGA V2.38 SIM';
+      case 'HI': return '*SI 834567 PD300-SIM 0000A0F1';
+      case 'HT': return '*SI';
+      case 'SU': return s.mode === 'power' ? '*W' : '*J';
+      case 'BC': return '*1';
+      case 'AW': return `*CONTINUOUS 200 1100 ${s.wi} ${s.favs.join(' ')}`;
+      case 'WI':
+        if (a0 == null) return `*${s.wi}`;
+        if (a0 < 1 || a0 > 6 || s.favs[a0 - 1] === 'NONE') return '?BAD PARAMETER';
+        s.wi = a0; return '*';
+      case 'WL': {
+        if (!args.length) return `*${this._wl()}`;
+        const v = parseFloat(args[0]);
+        if (!(v >= 200 && v <= 1100)) return '?OUT OF RANGE';
+        s.favs[s.wi - 1] = Math.round(v); return '*';
+      }
+      case 'AR': return s.mode === 'power' ? `*${s.range} AUTO ${this.ranges.join(' ')}` : `*${Math.max(0, s.range)} ${this.eranges.join(' ')}`;
+      case 'RN': {
+        if (a0 == null) return `*${s.range}`;
+        const n = s.mode === 'power' ? this.ranges.length : this.eranges.length;
+        if (a0 < (s.mode === 'power' ? -1 : 0) || a0 >= n) return '?BAD PARAMETER';
+        s.range = a0; return '*';
+      }
+      case 'AQ':
+        if (a0 == null) return `*${s.aq} NONE 0.5s 1s 3s 10s 30s`;
+        if (a0 < 1 || a0 > 6) return '?BAD PARAMETER';
+        s.aq = a0; return `*${s.aq} NONE 0.5s 1s 3s 10s 30s`;
+      case 'FQ':
+        if (a0 == null) return `*${s.fq} OUT IN`;
+        if (a0 < 1 || a0 > 2) return '?BAD PARAMETER';
+        s.fq = a0; return `*${s.fq} OUT IN`;
+      case 'FP': s.mode = 'power'; return '*';
+      case 'FE': s.mode = 'energy'; s.range = 0; return '*';
+      case 'SP': {
+        if (s.mode !== 'power') return '?NOT IN POWER MODE';
+        const p = this._power();
+        if (s.range >= 0) {
+          const fs = parseSI(this.ranges[s.range]);
+          if (p > fs * 1.05) return '*OVER';
+        }
+        return '*' + p.toExponential(3).toUpperCase();
+      }
+      case 'EF': {
+        const now = performance.now();
+        if (now - s.lastPulse > 100) { return '*1'; }
+        return '*0';
+      }
+      case 'SE': {
+        s.lastPulse = performance.now();
+        const e = 1.5e-4 * (1 + 0.04 * (Math.random() - 0.5));
+        const fs = parseSI(this.eranges[Math.max(0, s.range)]);
+        if (e > fs) return '*OVER';
+        return '*' + e.toExponential(3).toUpperCase();
+      }
+      case 'ZE': s.zeroUntil = performance.now() + 3000; s.zeroDone = false; return '*';
+      case 'ZQ':
+        if (!s.zeroUntil) return '*ZEROING NOT STARTED';
+        if (performance.now() < s.zeroUntil) return '*ZEROING IN PROGRESS';
+        s.zeroDone = true; return '*ZEROING COMPLETED';
+      case 'ZS': return '*';
+      case 'RE': s.range = -1; s.aq = 1; s.fq = 1; s.mode = 'power'; return null; // meter reboots, no answer
+      default: return '?BAD COMMAND';
+    }
+  }
+}
+
+/* =====================================================================
+   Ophir protocol layer: serialised request/response with timeouts.
+   Commands are "$XX args<term>", replies start with '*' (ok) or '?' (error).
+   ===================================================================== */
+class DeviceError extends Error { constructor(msg, cmd) { super(msg); this.cmd = cmd; this.device = true; } }
+
+class Vega {
+  constructor(transport) {
+    this.t = transport;
+    this.queue = Promise.resolve();
+    this.waiter = null;
+    this.term = '\r';
+    this.timeout = 1000;
+    this.pending = 0;
+    transport.onLine = (l) => this._line(l);
+  }
+  _line(l) {
+    if (this.waiter) this.waiter(l);
+    else log('warn', 'Unsolicited: ' + l);
+  }
+  /** Queue a command; resolves with the reply text (leading '*' stripped). */
+  cmd(c, opts = {}) {
+    this.pending++;
+    const p = this.queue.then(() => this._exec(c, opts)).finally(() => this.pending--);
+    this.queue = p.catch(() => {});
+    return p;
+  }
+  async _exec(c, { timeout = this.timeout, quiet = false, noReply = false, probe = false } = {}) {
+    if (!quiet) log('tx', c);
+    let timer, resolve, reject;
+    const reply = new Promise((res, rej) => { resolve = res; reject = rej; });
+    this.waiter = (l) => {
+      if (l === c) return; // ignore an echo, if the adapter/meter echoes
+      clearTimeout(timer); this.waiter = null; resolve(l);
+    };
+    timer = setTimeout(() => { this.waiter = null; reject(new Error(`No reply to ${c} within ${timeout} ms`)); }, timeout);
+    try {
+      await this.t.write(c + this.term);
+    } catch (e) {
+      clearTimeout(timer); this.waiter = null;
+      throw e;
+    }
+    let line;
+    try { line = await reply; }
+    catch (e) { if (noReply) return ''; if (!quiet) log('err', e.message); throw e; }
+    // "probe" queries are expected to fail on heads that lack the feature, so don't flag them red
+    if (!quiet) log(line.startsWith('?') ? (probe ? 'info' : 'err') : 'rx', line + (line.startsWith('?') && probe ? '  (not supported by this head/meter)' : ''));
+    if (line.startsWith('?')) throw new DeviceError(line.slice(1).trim() || 'error', c);
+    return line.startsWith('*') ? line.slice(1).trim() : line.trim();
+  }
+}
+
+/* =====================================================================
+   Application state
+   ===================================================================== */
+const S = {
+  port: null, transport: null, dev: null, connected: false, connecting: false,
+  acquiring: false, pausedPlot: false, pauseT: 0,
+  mtype: 'power', unit: 'W',
+  info: {},
+  t: [], v: [],          // timestamps (ms epoch) and corrected values (W or J); NaN = over-range
+  last: null, lastT: 0, over: false,
+  stats: null, ref: null,
+  errCount: 0, rateWin: [], modeGen: 0,
+  yExpand: null, yZoom: 1,
+  lists: {},            // parsed list-type settings
+  wl: null,             // parsed wavelength info
+  alarmState: false,
+};
+function newStats() { return { n: 0, mean: 0, m2: 0, min: Infinity, max: -Infinity, t0: null, t1: null }; }
+S.stats = newStats();
+
+/* =====================================================================
+   Preferences (localStorage)
+   ===================================================================== */
+const PREF_KEY = 'vega-webserial-prefs-v1';
+const PREF_IDS = ['baud', 'dataBits', 'parity', 'stopBits', 'flow', 'term', 'timeout', 'dtr', 'rts', 'autoStart', 'pollMs',
+  'displayMode', 'fixedPrefix', 'digitsRange', 'attDb', 'calFactor', 'smoothN', 'windowSec', 'yMode', 'yMin', 'yMax', 'xLabels',
+  'lineWidth', 'logScale', 'showGrid', 'showMean', 'showSigma', 'showPoints', 'showSmooth', 'showFill', 'showAlarmLines',
+  'maxPts', 'theme', 'alarmEn', 'alarmLo', 'alarmHi', 'alarmBeep', 'logPoll', 'logScroll', 'statsSrc', 'sessionLabel'];
+function savePrefs() {
+  const o = {};
+  for (const id of PREF_IDS) { const el = $(id); if (el) o[id] = el.type === 'checkbox' ? el.checked : el.value; }
+  try { localStorage.setItem(PREF_KEY, JSON.stringify(o)); } catch {}
+}
+function loadPrefs() {
+  let o;
+  try { o = JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); } catch { o = {}; }
+  for (const id of PREF_IDS) {
+    const el = $(id);
+    if (!el || !(id in o)) continue;
+    if (el.type === 'checkbox') el.checked = !!o[id]; else el.value = o[id];
+  }
+}
+
+/* =====================================================================
+   Port selection
+   ===================================================================== */
+const VENDORS = { 0x0403: 'FTDI', 0x067b: 'Prolific', 0x10c4: 'Silicon Labs', 0x1a86: 'WCH', 0x2341: 'Arduino', 0x0557: 'ATEN', 0x05ad: 'Y.C. Cable', 0x0b95: 'ASIX', 0x04e2: 'Exar', 0x0451: 'TI', 0x2e8a: 'RP2040' };
+let grantedPorts = [];
+function portLabel(p, i) {
+  const info = p.getInfo ? p.getInfo() : {};
+  if (info.usbVendorId != null) {
+    const vid = info.usbVendorId.toString(16).padStart(4, '0'), pid = (info.usbProductId ?? 0).toString(16).padStart(4, '0');
+    return `#${i + 1} ${VENDORS[info.usbVendorId] || 'USB'} ${vid}:${pid}`;
+  }
+  if (info.bluetoothServiceClassId) return `#${i + 1} Bluetooth serial`;
+  return `#${i + 1} Native serial port`;
+}
+async function refreshPorts() {
+  const sel = $('portSel');
+  const prev = sel.value;
+  sel.innerHTML = '';
+  grantedPorts = 'serial' in navigator ? await navigator.serial.getPorts() : [];
+  grantedPorts.forEach((p, i) => sel.add(new Option(portLabel(p, i) + (p === S.port ? ' (open)' : ''), String(i))));
+  sel.add(new Option('＋ New port…', 'new'));
+  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  else if (S.port && grantedPorts.includes(S.port)) sel.value = String(grantedPorts.indexOf(S.port));
+  else sel.value = grantedPorts.length ? '0' : 'new';
+}
+async function getSelectedPort() {
+  const v = $('portSel').value;
+  if (v !== 'new' && grantedPorts[+v]) return grantedPorts[+v];
+  const p = await navigator.serial.requestPort({});
+  await refreshPorts();
+  $('portSel').value = String(grantedPorts.indexOf(p));
+  return p;
+}
+function serialOpts() {
+  return {
+    baudRate: +$('baud').value, dataBits: +$('dataBits').value, stopBits: +$('stopBits').value,
+    parity: $('parity').value, flowControl: $('flow').value, bufferSize: 4096,
+  };
+}
+
+/* =====================================================================
+   Connect / disconnect
+   ===================================================================== */
+function setStatus(text, led) {
+  $('statusText').textContent = text;
+  $('led').className = 'led' + (led ? ' ' + led : '');
+}
+function updateUiState() {
+  const c = S.connected;
+  $('btnConnect').disabled = c || S.connecting;
+  $('btnDisconnect').disabled = !c && !S.connecting;
+  $('btnAutoBaud').disabled = c || S.connecting || $('simMode').checked;
+  const sim = $('simMode').checked;
+  for (const id of ['portSel', 'btnPortRefresh', 'btnPortForget', 'baud', 'dataBits', 'parity', 'stopBits', 'flow', 'simMode']) {
+    const portOnly = id === 'portSel' || id.startsWith('btnPort');
+    $(id).disabled = c || S.connecting || (sim && portOnly);
+  }
+  for (const id of ['btnRefresh', 'btnZero', 'btnZeroQ', 'btnZeroS', 'btnReinfo', 'btnReset', 'btnSend', 'btnSingle']) $(id).disabled = !c;
+  $('btnStart').disabled = !c || S.acquiring;
+  $('btnStop').disabled = !S.acquiring;
+  $('connTag').textContent = c ? (S.transport instanceof SimTransport ? 'simulated' : 'online') : 'offline';
+  $('acqTag').textContent = S.acquiring ? 'running' : 'stopped';
+  document.querySelectorAll('input[name=mtype]').forEach((r) => (r.disabled = !c));
+  if (!c) {
+    for (const k of Object.keys(LIST_SETTINGS)) setListUnsupported(k, '—');
+    $('wlWrap').className = 'unsupported'; $('wlWrap').textContent = 'Connect to read wavelengths';
+    $('wlContRow').style.display = 'none'; $('wlChipsRow').style.display = 'none';
+    ['btnRangeUp', 'btnRangeDn', 'btnRangeAuto'].forEach((id) => ($(id).disabled = true));
+  }
+}
+
+async function connect() {
+  if (S.connected || S.connecting) return;
+  const sim = $('simMode').checked;
+  if (!sim && !('serial' in navigator)) { toast('Web Serial not supported in this browser', true); return; }
+  S.connecting = true; updateUiState();
+  setStatus('Connecting…', 'busy');
+  try {
+    let transport;
+    if (sim) {
+      transport = new SimTransport();
+      await transport.open();
+      $('i_port').textContent = 'SIMULATOR';
+    } else {
+      const port = await getSelectedPort();
+      transport = new SerialTransport(port);
+      const opts = serialOpts();
+      await transport.open(opts);
+      await transport.setSignals({ dataTerminalReady: $('dtr').checked, requestToSend: $('rts').checked });
+      S.port = port;
+      $('i_port').textContent = `${portLabel(port, grantedPorts.indexOf(port)).replace(/^#\d+ /, '')} @ ${opts.baudRate} ${opts.dataBits}${opts.parity[0].toUpperCase()}${opts.stopBits}`;
+      log('info', `Opened port: ${JSON.stringify(opts)}`);
+    }
+    S.transport = transport;
+    transport.onClosed = () => onLostConnection();
+    const dev = new Vega(transport);
+    dev.term = $('term').value.replace('\\r', '\r').replace('\\n', '\n');
+    dev.timeout = +$('timeout').value || 1000;
+    S.dev = dev;
+    await sleep(sim ? 0 : 150);
+
+    // Handshake: instrument info must answer, otherwise baud/cable is wrong.
+    let ii = null;
+    for (let i = 0; i < 3 && ii == null; i++) {
+      try { ii = await dev.cmd('$II'); } catch (e) { if (e.device) ii = ''; else await sleep(150); }
+    }
+    if (ii == null) throw new Error('Meter did not answer $II. Check the baud rate, the DB9 cable (try a null‑modem adapter if a straight cable gets no reply) and that the meter is on. Try Auto‑detect.');
+
+    S.connected = true; S.connecting = false;
+    updateUiState();
+    setStatus('Connected — reading device info…', 'busy');
+    parseII(ii);
+    await readDeviceInfo(true);
+    await readAllSettings();
+    setStatus(`Connected to ${S.info.instModel || 'meter'}`, 'on');
+    toast('Connected');
+    if ($('autoStart').checked) startAcq();
+  } catch (e) {
+    S.connecting = false;
+    if (e.name === 'NotFoundError') { setStatus('No port selected', ''); log('info', 'Port chooser cancelled'); }
+    else { setStatus('Connection failed', 'err'); log('err', e.message); toast(e.message, true); }
+    await teardown();
+  }
+  S.connecting = false;
+  updateUiState();
+  refreshPorts();
+}
+
+async function teardown() {
+  S.acquiring = false;
+  const t = S.transport;
+  S.transport = null; S.dev = null; S.connected = false;
+  if (t) await t.close();
+  S.port = null;
+}
+async function disconnect() {
+  stopAcq();
+  if (S.dev) await S.dev.queue; // let any in-flight command finish
+  await teardown();
+  setStatus('Disconnected', '');
+  log('info', 'Disconnected');
+  updateUiState();
+  refreshPorts();
+}
+function onLostConnection() {
+  if (!S.connected) return;
+  log('err', 'Serial port closed unexpectedly (adapter unplugged?)');
+  toast('Connection lost', true);
+  teardown().then(() => { setStatus('Connection lost', 'err'); updateUiState(); refreshPorts(); });
+}
+
+async function autoDetectBaud() {
+  if (!('serial' in navigator)) return;
+  let port;
+  try { port = await getSelectedPort(); } catch { return; }
+  const bauds = [9600, 19200, 38400, 57600, 115200, 4800, 2400, 1200];
+  $('btnAutoBaud').disabled = true; $('btnConnect').disabled = true;
+  setStatus('Auto‑detecting baud rate…', 'busy');
+  let found = null;
+  for (const b of bauds) {
+    const t = new SerialTransport(port);
+    try {
+      log('info', `Trying ${b} baud…`);
+      await t.open({ ...serialOpts(), baudRate: b });
+      await t.setSignals({ dataTerminalReady: $('dtr').checked, requestToSend: $('rts').checked });
+      const d = new Vega(t);
+      d.term = $('term').value.replace('\\r', '\r').replace('\\n', '\n');
+      await sleep(120);
+      const r = await d.cmd('$II', { timeout: 500 }).catch((e) => (e.device ? 'device-error' : null));
+      if (r != null) { found = b; }
+    } catch (e) { log('warn', `${b}: ${e.message}`); }
+    await t.close();
+    if (found) break;
+  }
+  if (found) { $('baud').value = String(found); savePrefs(); setStatus(`Found meter at ${found} baud`, ''); toast(`Meter answers at ${found} baud`); log('info', `Detected ${found} baud`); }
+  else { setStatus('No response at any baud rate', 'err'); toast('No response at any baud rate. Check cable and terminator.', true); }
+  updateUiState();
+}
+
+/* =====================================================================
+   Device information
+   ===================================================================== */
+const HEAD_TYPES = {
+  TH: 'Thermopile', SI: 'Photodiode', PY: 'Pyroelectric', BT: 'BeamTrack thermal', BC: 'BeamTrack', RM: 'RM9 radiometer',
+  CP: 'Pyro (PE‑C)', XX: 'No head', NS: 'Head not supported', SH: 'Thermopile (smart)', LX: 'Illuminance', TP: 'Thermopile',
+};
+function parseII(r) {
+  const t = (r || '').split(/\s+/).filter(Boolean);
+  S.info.instModel = t[0] || '?';
+  S.info.instSN = t[1] || '—';
+  S.info.instName = t.slice(2).join(' ');
+  $('i_inst').textContent = S.info.instModel + (S.info.instName && S.info.instName !== S.info.instModel ? ` (${S.info.instName})` : '');
+  $('i_isn').textContent = S.info.instSN;
+}
+async function q(c, opts) { try { return await S.dev.cmd(c, { probe: true, ...opts }); } catch (e) { return null; } }
+
+async function readDeviceInfo(skipII = false) {
+  if (!S.dev) return;
+  if (!skipII) { const ii = await q('$II'); if (ii != null) parseII(ii); }
+  const ve = await q('$VE');
+  S.info.fw = ve;
+  $('i_fw').textContent = ve ?? 'n/a';
+  const hi = await q('$HI');
+  if (hi != null) {
+    const t = hi.split(/\s+/).filter(Boolean);
+    S.info.headTypeCode = t[0];
+    S.info.headSN = t[1] || '—';
+    const capIdx = t.length > 3 && /^[0-9A-F]{4,8}$/i.test(t[t.length - 1]) ? t.length - 1 : -1;
+    S.info.headName = (capIdx > 0 ? t.slice(2, capIdx) : t.slice(2)).join(' ') || '—';
+    S.info.headCaps = capIdx > 0 ? t[capIdx] : '—';
+  }
+  const ht = await q('$HT');
+  if (ht) S.info.headTypeCode = ht.split(/\s+/)[0];
+  const code = (S.info.headTypeCode || '').toUpperCase();
+  $('i_head').textContent = S.info.headName || '—';
+  $('i_hsn').textContent = S.info.headSN || '—';
+  $('i_htype').textContent = code ? `${HEAD_TYPES[code] || 'Unknown'} (${code})` : '—';
+  $('i_hcap').textContent = S.info.headCaps ? '0x' + S.info.headCaps : '—';
+  if (code === 'XX') toast('No sensor head is connected to the meter', true);
+  await readUnits();
+  log('info', `Instrument ${S.info.instModel} S/N ${S.info.instSN}, FW ${S.info.fw ?? 'n/a'}; head ${S.info.headName} S/N ${S.info.headSN} (${code})`);
+}
+async function readUnits() {
+  const su = await q('$SU');
+  if (su && /^[A-Za-z]+$/.test(su.trim())) S.unit = su.trim().toUpperCase().slice(0, 3);
+  else S.unit = S.mtype === 'energy' ? 'J' : 'W';
+  if (S.unit === 'W') S.mtype = 'power'; else if (S.unit === 'J') S.mtype = 'energy';
+  document.querySelectorAll('input[name=mtype]').forEach((r) => (r.checked = r.value === S.mtype));
+  $('i_units').textContent = `${S.unit} · ${S.mtype === 'energy' ? 'Energy' : 'Power'}`;
+  $('readLbl').textContent = S.mtype === 'energy' ? 'Pulse energy' : 'Optical power';
+}
+
+/* =====================================================================
+   List-type settings ($AR/$RN, $AQ, $FQ, $DQ, $MM, $ET, $PL)
+   Reply format: "*<current index> OPT1 OPT2 ..."
+   ===================================================================== */
+const LIST_SETTINGS = {
+  range:    { q: '$AR', set: '$RN', el: 'selRange', info: 'i_range', name: 'Range' },
+  avg:      { q: '$AQ', set: '$AQ', el: 'selAvg', info: 'i_avg', name: 'Averaging', base: 1 },
+  filter:   { q: '$FQ', set: '$FQ', el: 'selFilter', name: 'Filter', base: 1 },
+  diffuser: { q: '$DQ', set: '$DQ', el: 'selDiffuser', name: 'Diffuser', base: 1 },
+  mm:       { q: '$MM', set: '$MM', el: 'selMM', name: 'Measurement mode', base: 1 },
+  et:       { q: '$ET', set: '$ET', el: 'selET', name: 'Energy threshold', base: 1 },
+  pl:       { q: '$PL', set: '$PL', el: 'selPL', name: 'Pulse length', base: 1 },
+};
+function setListUnsupported(key, txt = 'n/a for this head') {
+  const d = LIST_SETTINGS[key], sel = $(d.el);
+  sel.innerHTML = ''; sel.add(new Option(txt, '')); sel.disabled = true;
+  if (d.info) $(d.info).textContent = '—';
+  S.lists[key] = null;
+}
+function parseList(key, r) {
+  const d = LIST_SETTINGS[key];
+  const t = (r || '').split(/\s+/).filter(Boolean);
+  const cur = parseInt(t[0], 10);
+  const names = t.slice(1);
+  if (!isFinite(cur) || !names.length) return null;
+  const opts = [];
+  if (key === 'range') {
+    // AUTO (if present) = -1, then fixed ranges 0..n-1 from highest to lowest
+    const hasAuto = names[0].toUpperCase() === 'AUTO';
+    names.forEach((n, i) => opts.push({ name: n, value: hasAuto ? i - 1 : i, fs: parseSI(n) }));
+  } else {
+    if (cur === 0) d.base = 0; // a reply of 0 tells us this list is 0-based
+    names.forEach((n, i) => opts.push({ name: n, value: i + d.base }));
+  }
+  return { cur, opts };
+}
+function renderList(key) {
+  const d = LIST_SETTINGS[key], L = S.lists[key], sel = $(d.el);
+  if (!L) return;
+  sel.innerHTML = '';
+  for (const o of L.opts) {
+    if (o.name.toUpperCase() === 'NONE' && key !== 'avg' && key !== 'pl' && key !== 'et') continue; // empty slots
+    sel.add(new Option(o.name, String(o.value)));
+  }
+  sel.value = String(L.cur);
+  sel.disabled = false;
+  const curOpt = L.opts.find((o) => o.value === L.cur);
+  if (d.info) $(d.info).textContent = curOpt ? curOpt.name : '—';
+  if (key === 'range') {
+    const hasAuto = L.opts.some((o) => o.value === -1);
+    $('btnRangeAuto').disabled = !hasAuto;
+    $('btnRangeAuto').classList.toggle('active', L.cur === -1);
+    $('btnRangeUp').disabled = L.cur <= 0;
+    $('btnRangeDn').disabled = L.cur >= Math.max(...L.opts.map((o) => o.value));
+  }
+}
+async function readList(key) {
+  const d = LIST_SETTINGS[key];
+  let r;
+  try { r = await S.dev.cmd(d.q, { probe: true }); } catch (e) { setListUnsupported(key); return; }
+  const L = parseList(key, r);
+  if (!L) { setListUnsupported(key); return; }
+  S.lists[key] = L;
+  renderList(key);
+}
+async function applyList(key, value) {
+  const d = LIST_SETTINGS[key];
+  try {
+    await S.dev.cmd(`${d.set} ${value}`);
+    toast(`${d.name} set`);
+  } catch (e) { toast(`${d.name}: ${e.message}`, true); }
+  await readList(key);
+  if (key === 'mm') { await readUnits(); await readList('range'); }
+}
+function currentRangeFS() {
+  const L = S.lists.range;
+  if (!L) return null;
+  if (L.cur === -1) { // autorange: use the largest fixed range for the bar
+    const fixed = L.opts.filter((o) => o.value >= 0 && isFinite(o.fs));
+    return fixed.length ? { fs: fixed[0].fs, auto: true } : null;
+  }
+  const o = L.opts.find((x) => x.value === L.cur);
+  return o && isFinite(o.fs) ? { fs: o.fs, auto: false, name: o.name } : null;
+}
+
+/* =====================================================================
+   Wavelength ($AW, $WI, $WL)
+   "*CONTINUOUS <min> <max> <cur idx> <fav1..fav6|NONE>"   (photodiodes)
+   "*DISCRETE <cur idx> <wl1> <wl2> ..."                    (thermal / pyro)
+   ===================================================================== */
+const LASER_LINES = [266, 355, 405, 450, 488, 515, 520, 532, 561, 633, 660, 780, 808, 850, 905, 940, 980, 1030, 1064, 1310, 1550, 1940, 2050, 10600];
+function parseAW(r) {
+  const t = (r || '').split(/\s+/).filter(Boolean);
+  if (!t.length) return null;
+  const kind = t[0].toUpperCase();
+  if (kind === 'CONTINUOUS') {
+    const min = parseFloat(t[1]), max = parseFloat(t[2]);
+    let cur = parseInt(t[3], 10), favs = t.slice(4);
+    if (!isFinite(cur) || cur > 20) { favs = t.slice(3); cur = 1; }
+    return { kind: 'continuous', min, max, cur, opts: favs.map((n, i) => ({ name: n, value: i + 1 })) };
+  }
+  if (kind === 'DISCRETE') {
+    const cur = parseInt(t[1], 10);
+    return { kind: 'discrete', cur, opts: t.slice(2).map((n, i) => ({ name: n, value: i + 1 })) };
+  }
+  return null;
+}
+function wlLabel(n, kind) {
+  if (n.toUpperCase() === 'NONE') return null;
+  // thermal discrete lists are usually in µm with mixed notations like ".8-6" or "10.6"; photodiodes in nm
+  return kind === 'continuous' ? `${n} nm` : (/^[\d.]+$/.test(n) && parseFloat(n) < 50 ? `${n} µm` : n);
+}
+async function readWavelengths() {
+  const wrap = $('wlWrap');
+  let r;
+  try { r = await S.dev.cmd("$AW", { probe: true }); } catch (e) { r = null; }
+  const W = r ? parseAW(r) : null;
+  S.wl = W;
+  if (!W) {
+    wrap.className = 'unsupported'; wrap.textContent = 'n/a for this head';
+    $('wlContRow').style.display = 'none'; $('wlChipsRow').style.display = 'none';
+    $('i_wl').textContent = '—';
+    return;
+  }
+  wrap.className = ''; wrap.innerHTML = '';
+  const sel = document.createElement('select');
+  sel.id = 'selWl';
+  for (const o of W.opts) { const l = wlLabel(o.name, W.kind); if (l) sel.add(new Option(l, String(o.value))); }
+  sel.value = String(W.cur);
+  sel.title = W.kind === 'continuous' ? 'Favourite wavelength slots ($WI)' : 'Calibrated wavelengths ($WI)';
+  sel.addEventListener('change', () => setWlIndex(+sel.value));
+  wrap.appendChild(sel);
+  const curOpt = W.opts.find((o) => o.value === W.cur);
+  $('i_wl').textContent = curOpt ? wlLabel(curOpt.name, W.kind) : '—';
+  if (W.kind === 'continuous') {
+    $('wlContRow').style.display = '';
+    $('wlChipsRow').style.display = '';
+    const inp = $('wlInput');
+    inp.min = W.min; inp.max = W.max;
+    inp.placeholder = `${W.min}–${W.max}`;
+    if (curOpt && document.activeElement !== inp) inp.value = parseFloat(curOpt.name) || '';
+    $('wlContRow').querySelector('label').textContent = `Set λ (${W.min}–${W.max} nm)`;
+    const chips = $('wlChips'); chips.innerHTML = '';
+    for (const l of LASER_LINES) {
+      if (l < W.min || l > W.max) continue;
+      const b = document.createElement('button');
+      b.className = 'sm chip' + (curOpt && parseFloat(curOpt.name) === l ? ' active' : '');
+      b.textContent = l;
+      b.title = `Set ${l} nm`;
+      b.addEventListener('click', () => setWlNm(l));
+      chips.appendChild(b);
+    }
+  } else {
+    $('wlContRow').style.display = 'none'; $('wlChipsRow').style.display = 'none';
+  }
+}
+async function setWlIndex(i) {
+  try { await S.dev.cmd(`$WI ${i}`); toast('Wavelength set'); } catch (e) { toast('Wavelength: ' + e.message, true); }
+  await readWavelengths();
+}
+async function setWlNm(nm) {
+  const W = S.wl;
+  if (!W || W.kind !== 'continuous') return;
+  nm = Math.round(nm);
+  if (!(nm >= W.min && nm <= W.max)) { toast(`Wavelength must be ${W.min}–${W.max} nm`, true); return; }
+  try { await S.dev.cmd(`$WL ${nm}`); toast(`Wavelength ${nm} nm`); } catch (e) { toast('Wavelength: ' + e.message, true); }
+  await readWavelengths();
+}
+
+async function readAllSettings() {
+  if (!S.dev) return;
+  $('btnRefresh').disabled = true;
+  await readWavelengths();
+  for (const k of Object.keys(LIST_SETTINGS)) await readList(k);
+  $('btnRefresh').disabled = !S.connected;
+}
+
+/* =====================================================================
+   Acquisition loop
+   ===================================================================== */
+let pollGen = 0;
+function startAcq() {
+  if (!S.connected || S.acquiring) return;
+  S.acquiring = true;
+  S.noEF = false;
+  updateUiState();
+  setStatus(`Acquiring from ${S.info.instModel || 'meter'}`, 'on');
+  pollLoop(++pollGen);
+}
+function stopAcq() {
+  S.acquiring = false;
+  updateUiState();
+  if (S.connected) setStatus(`Connected to ${S.info.instModel || 'meter'}`, 'on');
+}
+async function readOnce() {
+  const quiet = !$('logPoll').checked;
+  const gen = S.modeGen; // replies that straddle a power/energy switch are discarded
+  if (S.mtype === 'energy') {
+    if (!S.noEF) {
+      try {
+        const f = await S.dev.cmd('$EF', { quiet });
+        if (f.trim() !== '1') return; // no new pulse since last read
+      } catch (e) {
+        if (e.device) { S.noEF = true; log('warn', '$EF not supported; reading $SE every poll'); } else throw e;
+      }
+    }
+    const r = await S.dev.cmd('$SE', { quiet });
+    if (gen === S.modeGen) ingest(r);
+  } else {
+    const r = await S.dev.cmd('$SP', { quiet });
+    if (gen === S.modeGen) ingest(r);
+  }
+}
+async function pollLoop(gen) {
+  let consecutiveErr = 0;
+  while (S.acquiring && gen === pollGen && S.dev) {
+    const t0 = performance.now();
+    try {
+      await readOnce();
+      consecutiveErr = 0;
+    } catch (e) {
+      S.errCount++; consecutiveErr++;
+      $('errTxt').textContent = S.errCount;
+      if (consecutiveErr === 1 || consecutiveErr % 20 === 0) log('err', `Read failed: ${e.message}`);
+      if (consecutiveErr >= 10) setStatus('Meter not responding…', 'err');
+    }
+    const interval = clamp(+$('pollMs').value || 200, 20, 60000);
+    const wait = interval - (performance.now() - t0);
+    if (wait > 0) await sleep(wait);
+    else await sleep(0);
+  }
+}
+function correction() {
+  const att = parseFloat($('attDb').value) || 0;
+  const cal = parseFloat($('calFactor').value);
+  return Math.pow(10, att / 10) * (isFinite(cal) && cal > 0 ? cal : 1);
+}
+function ingest(r) {
+  const now = Date.now();
+  const txt = (r || '').trim().toUpperCase();
+  let v = parseFloat(txt);
+  S.over = false;
+  if (!isFinite(v) || /OVER|UNDER|SAT/.test(txt)) {
+    S.over = /UNDER/.test(txt) ? 'UNDER' : 'OVER';
+    v = NaN;
+  } else {
+    v *= correction();
+  }
+  S.t.push(now); S.v.push(v);
+  S.last = v; S.lastT = now;
+  const maxPts = Math.max(1000, +$('maxPts').value || 200000);
+  if (S.t.length > maxPts) { const cut = S.t.length - Math.floor(maxPts * 0.9); S.t.splice(0, cut); S.v.splice(0, cut); }
+  if (isFinite(v)) {
+    const st = S.stats;
+    st.n++; const d = v - st.mean; st.mean += d / st.n; st.m2 += d * (v - st.mean);
+    st.min = Math.min(st.min, v); st.max = Math.max(st.max, v);
+    if (st.t0 == null) st.t0 = now;
+    st.t1 = now;
+  }
+  S.rateWin.push(performance.now());
+  dirty = true;
+}
+
+/* =====================================================================
+   Display transforms
+   ===================================================================== */
+function dispMode() { return $('displayMode').value; }
+function xf(v) {
+  switch (dispMode()) {
+    case 'dbm': return v > 0 ? 10 * Math.log10(v / 1e-3) : NaN;
+    case 'relpct': return S.ref ? (v / S.ref) * 100 : NaN;
+    case 'reldb': return S.ref && v > 0 ? 10 * Math.log10(v / S.ref) : NaN;
+    default: return v;
+  }
+}
+function fmtDisp(v, sig) {
+  sig = sig ?? +$('digitsRange').value;
+  if (!isFinite(v)) return '—';
+  switch (dispMode()) {
+    case 'dbm': return v.toFixed(clamp(sig - 2, 1, 4)) + (S.unit === 'J' ? ' dBmJ' : ' dBm');
+    case 'relpct': return toSig(v, sig) + ' %';
+    case 'reldb': return (v >= 0 ? '+' : '') + v.toFixed(Math.max(1, sig - 2)) + ' dB';
+    default: return fmtSI(v, S.unit, sig, $('fixedPrefix').value);
+  }
+}
+function fmtAbs(v, sig) { return fmtSI(v, S.unit, sig ?? +$('digitsRange').value, $('fixedPrefix').value); }
+function smoothed(n) {
+  // moving average of the last n finite samples
+  let s = 0, c = 0;
+  for (let i = S.v.length - 1; i >= 0 && c < n; i--) { if (isFinite(S.v[i])) { s += S.v[i]; c++; } }
+  return c ? s / c : NaN;
+}
+
+/* =====================================================================
+   Readout + stats rendering
+   ===================================================================== */
+let audioCtx = null, lastBeep = 0;
+function beep() {
+  const now = performance.now();
+  if (now - lastBeep < 800) return;
+  lastBeep = now;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = 880; g.gain.value = 0.08;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.15);
+  } catch {}
+}
+function alarmLimits() {
+  return { en: $('alarmEn').checked, lo: parseSI($('alarmLo').value), hi: parseSI($('alarmHi').value) };
+}
+function computeVisStats() {
+  const [i0, i1] = visibleRange();
+  const st = newStats();
+  for (let i = i0; i < i1; i++) {
+    const v = S.v[i];
+    if (!isFinite(v)) continue;
+    st.n++; const d = v - st.mean; st.mean += d / st.n; st.m2 += d * (v - st.mean);
+    st.min = Math.min(st.min, v); st.max = Math.max(st.max, v);
+    if (st.t0 == null) st.t0 = S.t[i];
+    st.t1 = S.t[i];
+  }
+  return st;
+}
+function renderReadout() {
+  const n = Math.max(1, +$('smoothN').value || 1);
+  const v = n > 1 ? smoothed(n) : S.last;
+  const big = $('bigVal');
+  big.classList.remove('alarm', 'over');
+  if (S.last == null && !S.over) { big.textContent = '—'; }
+  else if (S.over) { big.textContent = S.over === 'UNDER' ? 'UNDER' : 'OVER RANGE'; big.classList.add('over'); }
+  else big.textContent = fmtDisp(xf(v));
+  // secondary line: the other representations
+  if (isFinite(v)) {
+    const parts = [];
+    if (dispMode() !== 'abs') parts.push(fmtAbs(v));
+    if (dispMode() !== 'dbm' && v > 0) parts.push((10 * Math.log10(v / 1e-3)).toFixed(2) + (S.unit === 'J' ? ' dBmJ' : ' dBm'));
+    if (S.ref && dispMode() !== 'relpct') parts.push(((v / S.ref) * 100).toFixed(2) + ' % ref');
+    if (n > 1) parts.push(`avg of ${n}`);
+    const c = correction();
+    if (c !== 1) parts.push(`corr ×${c.toPrecision(4)}`);
+    $('subVal').textContent = parts.join('  ·  ') || ' ';
+  } else $('subVal').textContent = ' ';
+  // age
+  $('readAge').textContent = S.lastT ? (S.acquiring ? '' : 'last ' + new Date(S.lastT).toLocaleTimeString()) : '';
+  // range bar (uses raw reading before external correction so it reflects the meter's range)
+  const R = currentRangeFS();
+  const fill = $('rangeFill');
+  if (R && isFinite(S.last)) {
+    const raw = S.last / correction();
+    const pct = clamp((raw / R.fs) * 100, 0, 100);
+    fill.style.width = pct + '%';
+    fill.className = pct >= 100 ? 'full' : pct > 90 ? 'hot' : '';
+    $('rangePct').textContent = `${((raw / R.fs) * 100).toFixed(1)} %`;
+    $('rangeFs').textContent = (R.auto ? 'AUTO · max ' : 'full scale ') + fmtSI(R.fs, S.unit, 3);
+  } else {
+    fill.style.width = S.over ? '100%' : '0%';
+    fill.className = S.over ? 'full' : '';
+    $('rangePct').textContent = S.over ? 'OVER' : '—';
+    $('rangeFs').textContent = R ? (R.auto ? 'AUTO' : 'full scale ' + fmtSI(R.fs, S.unit, 3)) : 'full scale —';
+  }
+  // alarms
+  const A = alarmLimits();
+  let alarm = false;
+  if (A.en && isFinite(v)) alarm = (isFinite(A.lo) && v < A.lo) || (isFinite(A.hi) && v > A.hi);
+  if (A.en && S.over) alarm = true;
+  $('alarmBadge').classList.toggle('show', alarm);
+  if (alarm) { big.classList.add('alarm'); if ($('alarmBeep').checked && S.acquiring) beep(); }
+  if (alarm && !S.alarmState) log('warn', `ALARM: reading ${S.over ? S.over : fmtAbs(v)} outside limits`);
+  S.alarmState = alarm;
+  // stats
+  const st = $('statsSrc').value === 'vis' ? computeVisStats() : S.stats;
+  $('statsScope').textContent = $('statsSrc').value === 'vis' ? '(visible window)' : '(since reset)';
+  const sd = st.n > 1 ? Math.sqrt(st.m2 / (st.n - 1)) : NaN;
+  const sig = +$('digitsRange').value;
+  $('s_mean').textContent = st.n ? fmtAbs(st.mean, sig) : '—';
+  $('s_std').textContent = st.n > 1 ? fmtAbs(sd, Math.max(2, sig - 1)) : '—';
+  $('s_min').textContent = st.n ? fmtAbs(st.min, sig) : '—';
+  $('s_max').textContent = st.n ? fmtAbs(st.max, sig) : '—';
+  $('s_pp').textContent = st.n ? fmtAbs(st.max - st.min, Math.max(2, sig - 1)) : '—';
+  $('s_stab').textContent = st.n > 1 && st.mean ? ((sd / Math.abs(st.mean)) * 100).toFixed(3) + ' %' : '—';
+  $('s_ppm').textContent = st.n > 1 && st.mean ? (((st.max - st.min) / Math.abs(st.mean)) * 100).toFixed(3) + ' %' : '—';
+  $('s_n').textContent = st.n.toLocaleString();
+  $('s_dur').textContent = st.t0 != null ? fmtDur((st.t1 - st.t0) / 1000) : '—';
+  // rate
+  const nowp = performance.now();
+  while (S.rateWin.length && nowp - S.rateWin[0] > 5000) S.rateWin.shift();
+  const rate = S.rateWin.length > 1 ? (S.rateWin.length - 1) / ((S.rateWin[S.rateWin.length - 1] - S.rateWin[0]) / 1000) : 0;
+  $('rateTxt').textContent = S.acquiring ? `${rate.toFixed(1)} samples/s` : '—';
+  $('ptsTag').textContent = S.t.length.toLocaleString() + ' pts';
+  $('refTxt').textContent = S.ref ? fmtAbs(S.ref) : 'none';
+}
+
+/* =====================================================================
+   Plot (canvas, no dependencies)
+   ===================================================================== */
+const canvas = $('plot');
+const ctx = canvas.getContext('2d');
+let dirty = true, hover = null, plotGeom = null;
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(r.width * dpr));
+  canvas.height = Math.max(1, Math.round(r.height * dpr));
+  dirty = true;
+}
+new ResizeObserver(resizeCanvas).observe(canvas);
+
+function lowerBound(arr, x) { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < x) lo = m + 1; else hi = m; } return lo; }
+function timeWindow() {
+  const w = +$('windowSec').value * 1000;
+  const tEnd = S.pausedPlot ? S.pauseT : (S.acquiring ? Date.now() : (S.t.length ? S.t[S.t.length - 1] : Date.now()));
+  if (!w) return [S.t.length ? S.t[0] : tEnd - 60000, Math.max(tEnd, (S.t[0] ?? 0) + 1000)];
+  return [tEnd - w, tEnd];
+}
+function visibleRange() {
+  const [a, b] = timeWindow();
+  return [lowerBound(S.t, a), lowerBound(S.t, b + 1)];
+}
+function niceStep(range, target) {
+  const raw = range / Math.max(1, target);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+}
+function fmtTick(v, step) {
+  const m = dispMode();
+  if (m === 'abs') {
+    // choose a prefix from the step size so all ticks share it
+    const ref = Math.max(Math.abs(v), step);
+    const p = PREFIXES.find((x) => ref >= x[0] * 0.9995) || PREFIXES[PREFIXES.length - 1];
+    const dec = clamp(-Math.floor(Math.log10(step / p[0]) + 1e-9), 0, 6);
+    return (v / p[0]).toFixed(dec) + ' ' + p[1] + S.unit;
+  }
+  const dec = clamp(-Math.floor(Math.log10(step) + 1e-9), 0, 6);
+  return v.toFixed(dec) + (m === 'relpct' ? '%' : m === 'dbm' ? '' : '');
+}
+function yAxisTitle() {
+  switch (dispMode()) {
+    case 'dbm': return S.unit === 'J' ? 'dBmJ' : 'dBm';
+    case 'relpct': return '% of reference';
+    case 'reldb': return 'dB re reference';
+    default: return S.mtype === 'energy' ? 'Energy' : 'Power';
+  }
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.width / dpr, H = canvas.height / dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const C = { bg: cssVar('--plot-bg'), grid: cssVar('--grid'), axis: cssVar('--axis'), text: cssVar('--text'), trace: cssVar('--trace'), trace2: cssVar('--trace2'), mean: cssVar('--mean'), err: cssVar('--err'), warn: cssVar('--warn'), ok: cssVar('--ok') };
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  const L = 78, R = 14, T = 14, B = 34;
+  const pw = W - L - R, ph = H - T - B;
+  if (pw < 20 || ph < 20) return;
+
+  const [ta, tb] = timeWindow();
+  const [i0, i1] = visibleRange();
+  const logY = $('logScale').checked && dispMode() === 'abs';
+  const yv = (v) => { const x = xf(v); return logY ? (x > 0 ? Math.log10(x) : NaN) : x; };
+
+  // ---- y range
+  let ymin = Infinity, ymax = -Infinity;
+  for (let i = i0; i < i1; i++) { const y = yv(S.v[i]); if (isFinite(y)) { if (y < ymin) ymin = y; if (y > ymax) ymax = y; } }
+  const A = alarmLimits();
+  const mode = $('yMode').value;
+  if (mode === 'manual') {
+    let a = parseSI($('yMin').value), b = parseSI($('yMax').value);
+    if (logY) { a = a > 0 ? Math.log10(a) : NaN; b = b > 0 ? Math.log10(b) : NaN; }
+    if (isFinite(a)) ymin = a; if (isFinite(b)) ymax = b;
+  }
+  if (!isFinite(ymin) || !isFinite(ymax)) { ymin = logY ? -4 : 0; ymax = logY ? -2 : 1; }
+  if (mode === 'zero' && !logY) { ymin = Math.min(0, ymin); ymax = Math.max(0, ymax); }
+  if (ymax - ymin < 1e-15 || (ymax - ymin) / (Math.abs(ymax) + 1e-300) < 1e-9) {
+    const d = logY ? 0.5 : Math.abs(ymax) * 0.01 || 1e-12; ymin -= d; ymax += d;
+  }
+  if (mode !== 'manual') {
+    const pad = (ymax - ymin) * 0.08;
+    const pinZero = mode === 'zero' && ymin >= 0;
+    ymin = pinZero ? ymin : ymin - pad;
+    ymax += pad;
+  }
+  if (mode === 'expand') {
+    if (S.yExpand) { ymin = Math.min(ymin, S.yExpand[0]); ymax = Math.max(ymax, S.yExpand[1]); }
+    S.yExpand = [ymin, ymax];
+  }
+  if (S.yZoom !== 1 && mode !== 'manual') { const c = (ymin + ymax) / 2, h = (ymax - ymin) / 2 * S.yZoom; ymin = c - h; ymax = c + h; }
+
+  const X = (t) => L + ((t - ta) / (tb - ta)) * pw;
+  const Y = (y) => T + ph - ((y - ymin) / (ymax - ymin)) * ph;
+  plotGeom = { L, R, T, B, pw, ph, ta, tb, ymin, ymax, logY, X, Y };
+
+  // ---- grid & axes
+  ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  ctx.lineWidth = 1;
+  const showGrid = $('showGrid').checked;
+  // y ticks
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  if (logY) {
+    const d0 = Math.floor(ymin), d1 = Math.ceil(ymax);
+    for (let d = d0; d <= d1; d++) {
+      for (const m of [1, 2, 5]) {
+        const y = d + Math.log10(m);
+        if (y < ymin || y > ymax) continue;
+        const py = Math.round(Y(y)) + 0.5;
+        if (showGrid) { ctx.strokeStyle = C.grid; ctx.globalAlpha = m === 1 ? 1 : 0.5; ctx.beginPath(); ctx.moveTo(L, py); ctx.lineTo(L + pw, py); ctx.stroke(); ctx.globalAlpha = 1; }
+        if (m === 1 || d1 - d0 <= 3) { ctx.fillStyle = C.axis; ctx.fillText(fmtSI(Math.pow(10, y), S.unit, 1), L - 6, py); }
+      }
+    }
+  } else {
+    const step = niceStep(ymax - ymin, Math.max(3, ph / 45));
+    for (let y = Math.ceil(ymin / step) * step; y <= ymax + step * 1e-6; y += step) {
+      const py = Math.round(Y(y)) + 0.5;
+      if (showGrid) { ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(L, py); ctx.lineTo(L + pw, py); ctx.stroke(); }
+      ctx.fillStyle = C.axis; ctx.fillText(fmtTick(Math.abs(y) < step * 1e-6 ? 0 : y, step), L - 6, py);
+    }
+  }
+  // x ticks
+  const spanS = (tb - ta) / 1000;
+  const xsteps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 43200, 86400];
+  const xstep = xsteps.find((s) => spanS / s <= Math.max(2, pw / 90)) || 86400;
+  const xmode = $('xLabels').value;
+  const t0ref = xmode === 'rel' ? tb : (S.t[0] ?? ta);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const firstTick = xmode === 'clock'
+    ? Math.ceil(ta / (xstep * 1000)) * xstep * 1000
+    : t0ref + Math.ceil((ta - t0ref) / (xstep * 1000)) * xstep * 1000;
+  for (let t = firstTick; t <= tb + 1; t += xstep * 1000) {
+    const px = Math.round(X(t)) + 0.5;
+    if (showGrid) { ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke(); }
+    let lbl;
+    if (xmode === 'clock') { const d = new Date(t); lbl = xstep >= 60 ? d.toTimeString().slice(0, 5) : d.toTimeString().slice(0, 8); }
+    else {
+      const s = (t - t0ref) / 1000;
+      const a = Math.abs(s);
+      lbl = a >= 3600 ? `${s < 0 ? '-' : ''}${Math.floor(a / 3600)}h${String(Math.floor((a % 3600) / 60)).padStart(2, '0')}`
+        : a >= 60 && xstep >= 60 ? `${s < 0 ? '-' : ''}${Math.floor(a / 60)}m${a % 60 ? String(Math.round(a % 60)).padStart(2, '0') : ''}`
+        : (xstep < 1 ? s.toFixed(1) : Math.round(s)) + 's';
+    }
+    ctx.fillStyle = C.axis; ctx.fillText(lbl, px, T + ph + 6);
+  }
+  // frame
+  ctx.strokeStyle = C.axis; ctx.globalAlpha = 0.5;
+  ctx.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
+  ctx.globalAlpha = 1;
+  // y title
+  ctx.save(); ctx.translate(12, T + ph / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = C.axis;
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillText(yAxisTitle() + (logY ? ' (log)' : ''), 0, 0);
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+
+  // ---- stats overlays (visible window)
+  const vs = computeVisStats();
+  if (vs.n > 1) {
+    const sd = Math.sqrt(vs.m2 / (vs.n - 1));
+    if ($('showSigma').checked) {
+      const ya = yv(vs.mean - sd), yb = yv(vs.mean + sd);
+      if (isFinite(yb)) {
+        const top = Y(yb), bot = isFinite(ya) ? Y(ya) : T + ph;
+        ctx.fillStyle = C.mean; ctx.globalAlpha = 0.12; ctx.fillRect(L, top, pw, bot - top); ctx.globalAlpha = 1;
+      }
+    }
+    if ($('showMean').checked) {
+      const ym = yv(vs.mean);
+      if (isFinite(ym)) {
+        const py = Y(ym);
+        ctx.strokeStyle = C.mean; ctx.setLineDash([6, 4]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(L, py); ctx.lineTo(L + pw, py); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = C.mean; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        ctx.fillText('mean ' + fmtDisp(xf(vs.mean)), L + 6, py - 2);
+      }
+    }
+  }
+  // alarm lines
+  if (A.en && $('showAlarmLines').checked) {
+    for (const [lim, name] of [[A.lo, 'low'], [A.hi, 'high']]) {
+      if (!isFinite(lim)) continue;
+      const y = yv(lim);
+      if (!isFinite(y)) continue;
+      const py = Y(y);
+      ctx.strokeStyle = C.err; ctx.setLineDash([2, 3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(L, py); ctx.lineTo(L + pw, py); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = C.err; ctx.textAlign = 'right'; ctx.textBaseline = name === 'low' ? 'top' : 'bottom';
+      ctx.fillText(name + ' limit', L + pw - 6, py + (name === 'low' ? 2 : -2));
+    }
+  }
+
+  // ---- trace (min/max decimation per pixel column)
+  const lw = +$('lineWidth').value || 1.5;
+  const n = i1 - i0;
+  const traceOf = (getY, color, width, fill) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let pen = false, firstX = null, lastX = null;
+    if (n > pw * 2) {
+      let col = -1, cmin = Infinity, cmax = -Infinity, cfirst = NaN, clast = NaN;
+      const flush = () => {
+        if (col < 0 || !isFinite(cmin)) { pen = false; return; }
+        const px = L + col + 0.5;
+        if (!pen) { ctx.moveTo(px, Y(cfirst)); pen = true; if (firstX == null) firstX = px; } else ctx.lineTo(px, Y(cfirst));
+        ctx.lineTo(px, Y(cmin)); ctx.lineTo(px, Y(cmax)); ctx.lineTo(px, Y(clast));
+        lastX = px;
+      };
+      for (let i = i0; i < i1; i++) {
+        const c = Math.floor(X(S.t[i]) - L);
+        if (c !== col) { flush(); col = c; cmin = Infinity; cmax = -Infinity; cfirst = NaN; }
+        const y = getY(i);
+        if (!isFinite(y)) { flush(); pen = false; cmin = Infinity; cmax = -Infinity; cfirst = NaN; continue; }
+        if (!isFinite(cfirst)) cfirst = y;
+        clast = y; if (y < cmin) cmin = y; if (y > cmax) cmax = y;
+      }
+      flush();
+    } else {
+      for (let i = i0; i < i1; i++) {
+        const y = getY(i);
+        if (!isFinite(y)) { pen = false; continue; }
+        const px = X(S.t[i]), py = Y(y);
+        if (!pen) { ctx.moveTo(px, py); pen = true; if (firstX == null) firstX = px; } else ctx.lineTo(px, py);
+        lastX = px;
+      }
+    }
+    ctx.stroke();
+    if (fill && firstX != null) {
+      ctx.lineTo(lastX, T + ph); ctx.lineTo(firstX, T + ph); ctx.closePath();
+      ctx.fillStyle = color; ctx.globalAlpha = 0.12; ctx.fill(); ctx.globalAlpha = 1;
+    }
+  };
+  traceOf((i) => yv(S.v[i]), C.trace, lw, $('showFill').checked);
+
+  // smoothed overlay
+  const sn = Math.max(1, +$('smoothN').value || 1);
+  if ($('showSmooth').checked && sn > 1 && n > 1) {
+    const sm = new Float64Array(n);
+    let acc = 0, cnt = 0; const q = [];
+    for (let i = Math.max(0, i0 - sn); i < i1; i++) {
+      const v = S.v[i];
+      if (isFinite(v)) { q.push(v); acc += v; cnt++; if (q.length > sn) { acc -= q.shift(); cnt--; } }
+      if (i >= i0) sm[i - i0] = cnt ? yv(acc / cnt) : NaN;
+    }
+    traceOf((i) => sm[i - i0], C.trace2, Math.max(1.5, lw), false);
+  }
+
+  // points
+  if ($('showPoints').checked && n <= pw / 2) {
+    ctx.fillStyle = C.trace;
+    for (let i = i0; i < i1; i++) {
+      const y = yv(S.v[i]); if (!isFinite(y)) continue;
+      ctx.beginPath(); ctx.arc(X(S.t[i]), Y(y), Math.max(2, lw + 0.5), 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  // over-range markers
+  ctx.fillStyle = C.warn;
+  for (let i = i0; i < i1; i++) if (!isFinite(S.v[i])) ctx.fillRect(X(S.t[i]) - 1, T, 2, 6);
+
+  ctx.restore();
+
+  // ---- status text in plot
+  if (!S.t.length) {
+    ctx.fillStyle = C.axis; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '13px system-ui, sans-serif';
+    ctx.fillText(S.connected ? 'Waiting for data… press ▶ Start' : 'Connect to a Vega (or enable Simulation mode) to start plotting', L + pw / 2, T + ph / 2);
+  }
+  if (S.pausedPlot) {
+    ctx.fillStyle = C.warn; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.font = '600 11px system-ui, sans-serif';
+    ctx.fillText('PLOT PAUSED', L + pw - 6, T + 6);
+  }
+  if ((dispMode() === 'relpct' || dispMode() === 'reldb') && !S.ref) {
+    ctx.fillStyle = C.warn; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText('Set a reference (Reference & alarms) to use relative display', L + pw / 2, T + 8);
+  }
+
+  // ---- hover crosshair
+  if (hover && hover.x >= L && hover.x <= L + pw && n) {
+    const tHover = ta + ((hover.x - L) / pw) * (tb - ta);
+    let k = lowerBound(S.t, tHover);
+    if (k >= i1) k = i1 - 1;
+    if (k > i0 && Math.abs(S.t[k - 1] - tHover) < Math.abs(S.t[k] - tHover)) k--;
+    if (k >= i0 && k < i1) {
+      const px = X(S.t[k]);
+      ctx.strokeStyle = C.axis; ctx.globalAlpha = 0.6; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke(); ctx.globalAlpha = 1;
+      const y = yv(S.v[k]);
+      const lines = [
+        isFinite(S.v[k]) ? fmtDisp(xf(S.v[k])) : 'OVER RANGE',
+        new Date(S.t[k]).toLocaleTimeString() + '.' + String(S.t[k] % 1000).padStart(3, '0'),
+        `t = ${((S.t[k] - (S.t[0] ?? 0)) / 1000).toFixed(2)} s`,
+      ];
+      if (dispMode() !== 'abs' && isFinite(S.v[k])) lines.splice(1, 0, fmtAbs(S.v[k]));
+      if (isFinite(y)) { ctx.fillStyle = C.trace; ctx.beginPath(); ctx.arc(px, Y(y), 4, 0, Math.PI * 2); ctx.fill(); }
+      ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
+      const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14, bh = lines.length * 16 + 8;
+      let bx = px + 12, by = (isFinite(y) ? Y(y) : T + 20) - bh / 2;
+      if (bx + bw > L + pw) bx = px - 12 - bw;
+      by = clamp(by, T + 2, T + ph - bh - 2);
+      ctx.fillStyle = C.bg; ctx.strokeStyle = C.axis; ctx.globalAlpha = 0.92;
+      ctx.fillRect(bx, by, bw, bh); ctx.globalAlpha = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+      ctx.fillStyle = C.text; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      lines.forEach((l, j) => { ctx.fillStyle = j === 0 ? C.text : C.axis; ctx.fillText(l, bx + 7, by + 5 + j * 16); });
+    }
+  }
+}
+
+let lastUi = 0, lastDraw = 0;
+function frame(ts) {
+  // redraw on change, and at ~25 fps while the time axis is scrolling
+  if (dirty || (S.acquiring && !S.pausedPlot && ts - lastDraw > 40)) {
+    draw();
+    dirty = false; lastDraw = ts;
+  }
+  if (ts - lastUi > 100) { renderReadout(); lastUi = ts; }
+  requestAnimationFrame(frame);
+}
+
+canvas.addEventListener('mousemove', (e) => { const r = canvas.getBoundingClientRect(); hover = { x: e.clientX - r.left, y: e.clientY - r.top }; dirty = true; });
+canvas.addEventListener('mouseleave', () => { hover = null; dirty = true; });
+canvas.addEventListener('dblclick', () => resetScale());
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (e.shiftKey) {
+    S.yZoom = clamp(S.yZoom * (e.deltaY > 0 ? 1.15 : 1 / 1.15), 0.01, 100);
+    if ($('yMode').value === 'expand') S.yExpand = null;
+  } else {
+    const opts = [...$('windowSec').options].map((o) => +o.value).filter((v) => v > 0);
+    const cur = +$('windowSec').value || opts[opts.length - 1];
+    let i = opts.indexOf(cur);
+    i = clamp(i + (e.deltaY > 0 ? 1 : -1), 0, opts.length - 1);
+    $('windowSec').value = String(opts[i]);
+    syncWindowButtons(); savePrefs();
+  }
+  dirty = true;
+}, { passive: false });
+
+function resetScale() { S.yExpand = null; S.yZoom = 1; dirty = true; }
+function syncWindowButtons() { document.querySelectorAll('.wq').forEach((b) => b.classList.toggle('active', b.dataset.w === $('windowSec').value)); }
+
+/* =====================================================================
+   Export
+   ===================================================================== */
+function exportRange() {
+  if ($('exportVisible').checked) return visibleRange();
+  return [0, S.t.length];
+}
+function headerLines() {
+  const i = S.info;
+  return [
+    `# Ophir Vega optical power log`,
+    `# Exported: ${new Date().toISOString()}`,
+    `# Session: ${$('sessionLabel').value || ''}`,
+    `# Instrument: ${i.instModel || ''} S/N ${i.instSN || ''} FW ${i.fw || ''}`,
+    `# Head: ${i.headName || ''} S/N ${i.headSN || ''} type ${i.headTypeCode || ''}`,
+    `# Wavelength: ${$('i_wl').textContent}  Range: ${$('i_range').textContent}  Averaging: ${$('i_avg').textContent}`,
+    `# Correction factor applied: ${correction()} (ext. attenuator ${$('attDb').value} dB, cal ×${$('calFactor').value})`,
+    `# Reference: ${S.ref ?? ''}`,
+  ];
+}
+function exportCsv() {
+  const [a, b] = exportRange();
+  if (b <= a) { toast('No data to export', true); return; }
+  const t0 = S.t[a];
+  const rows = headerLines();
+  rows.push(`timestamp_iso,elapsed_s,value_${S.unit},dBm,status`);
+  for (let i = a; i < b; i++) {
+    const v = S.v[i];
+    rows.push([new Date(S.t[i]).toISOString(), ((S.t[i] - t0) / 1000).toFixed(3), isFinite(v) ? v.toExponential(6) : '', v > 0 ? (10 * Math.log10(v / 1e-3)).toFixed(4) : '', isFinite(v) ? 'ok' : 'over'].join(','));
+  }
+  download(`vega_${stamp()}.csv`, rows.join('\n') + '\n', 'text/csv');
+  toast(`Exported ${b - a} points`);
+}
+function exportJson() {
+  const [a, b] = exportRange();
+  if (b <= a) { toast('No data to export', true); return; }
+  const out = { exported: new Date().toISOString(), session: $('sessionLabel').value, info: S.info, unit: S.unit,
+    wavelength: $('i_wl').textContent, range: $('i_range').textContent, averaging: $('i_avg').textContent, correction: correction(), reference: S.ref,
+    t: S.t.slice(a, b), v: S.v.slice(a, b).map((v) => (isFinite(v) ? v : null)) };
+  download(`vega_${stamp()}.json`, JSON.stringify(out), 'application/json');
+}
+function exportPng() {
+  draw();
+  canvas.toBlob((blob) => download(`vega_plot_${stamp()}.png`, blob));
+}
+
+/* =====================================================================
+   Wiring
+   ===================================================================== */
+function bind() {
+  $('btnConnect').onclick = connect;
+  $('btnDisconnect').onclick = disconnect;
+  $('btnAutoBaud').onclick = autoDetectBaud;
+  $('btnPortRefresh').onclick = refreshPorts;
+  $('btnPortForget').onclick = async () => {
+    const v = $('portSel').value;
+    const p = grantedPorts[+v];
+    if (!p) return;
+    if (!p.forget) { toast('This browser cannot revoke port permissions', true); return; }
+    await p.forget(); toast('Port permission revoked'); refreshPorts();
+  };
+  $('simMode').onchange = () => { updateUiState(); savePrefs(); };
+  $('btnStart').onclick = startAcq;
+  $('btnStop').onclick = stopAcq;
+  $('btnSingle').onclick = async () => { try { await readOnce(); } catch (e) { toast(e.message, true); } };
+  $('btnErrReset').onclick = () => { S.errCount = 0; $('errTxt').textContent = '0'; };
+  const syncPoll = (src) => { const v = clamp(+src.value || 200, 20, 60000); $('pollMs').value = v; $('pollRange').value = Math.min(v, 2000); savePrefs(); };
+  $('pollRange').oninput = (e) => syncPoll(e.target);
+  $('pollMs').onchange = (e) => syncPoll(e.target);
+  document.querySelectorAll('input[name=mtype]').forEach((r) => r.addEventListener('change', async () => {
+    if (!S.dev || !r.checked) return;
+    const energy = r.value === 'energy';
+    // W and J samples can't share one plot/statistics set, so the buffer is cleared on a switch
+    if (S.t.length && !confirm(`Switching to ${energy ? 'energy (J)' : 'power (W)'} clears the ${S.t.length} stored points. Export first if you need them.\n\nSwitch now?`)) {
+      document.querySelectorAll('input[name=mtype]').forEach((x) => (x.checked = x.value === S.mtype));
+      return;
+    }
+    S.modeGen++;
+    try { await S.dev.cmd(energy ? '$FE' : '$FP'); S.mtype = energy ? 'energy' : 'power'; toast(energy ? 'Energy mode' : 'Power mode'); }
+    catch (e) { toast((energy ? 'Energy' : 'Power') + ' mode: ' + e.message, true); }
+    S.modeGen++;
+    S.noEF = false;
+    S.t = []; S.v = []; S.last = null; S.over = false;
+    resetStats(); resetScale();
+    await readUnits();
+    await readList('range'); await readList('mm'); await readList('et'); await readList('pl');
+  }));
+
+  $('btnRefresh').onclick = readAllSettings;
+  $('btnReinfo').onclick = () => readDeviceInfo(false);
+  for (const [k, d] of Object.entries(LIST_SETTINGS)) $(d.el).addEventListener('change', (e) => { if (e.target.value !== '') applyList(k, e.target.value); });
+  $('btnRangeAuto').onclick = () => applyList('range', -1);
+  $('btnRangeUp').onclick = () => { const L = S.lists.range; if (L) applyList('range', Math.max(0, L.cur - 1)); };
+  $('btnRangeDn').onclick = () => { const L = S.lists.range; if (L) applyList('range', Math.min(Math.max(...L.opts.map((o) => o.value)), Math.max(0, L.cur + 1))); };
+  $('btnWlSet').onclick = () => setWlNm(+$('wlInput').value);
+  $('wlInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') setWlNm(+$('wlInput').value); });
+
+  $('btnZero').onclick = async () => {
+    if (!confirm('Zeroing: block ALL light from the sensor first (cap it). Start zeroing now?')) return;
+    try { await S.dev.cmd('$ZE'); toast('Zeroing started — use Status to monitor, then Save'); } catch (e) { toast('Zero: ' + e.message, true); }
+  };
+  $('btnZeroQ').onclick = async () => { try { const r = await S.dev.cmd('$ZQ'); toast('Zero status: ' + (r || 'ok')); } catch (e) { toast('Zero status: ' + e.message, true); } };
+  $('btnZeroS').onclick = async () => { try { await S.dev.cmd('$ZS'); toast('Zero saved'); } catch (e) { toast('Save zero: ' + e.message, true); } };
+  $('btnReset').onclick = async () => {
+    if (!confirm('Send $RE (soft reset) to the meter? Acquisition will stop and settings will be re-read.')) return;
+    const was = S.acquiring; stopAcq();
+    await S.dev.cmd('$RE', { timeout: 500, noReply: true }).catch(() => {});
+    setStatus('Meter resetting…', 'busy');
+    await sleep(3000);
+    await readDeviceInfo(false);
+    await readAllSettings();
+    setStatus(`Connected to ${S.info.instModel || 'meter'}`, 'on');
+    if (was) startAcq();
+  };
+
+  // console
+  const hist = []; let hIdx = 0;
+  const send = async () => {
+    let c = $('cmdIn').value.trim();
+    if (!c || !S.dev) return;
+    if (!c.startsWith('$')) c = '$' + c;
+    c = c.toUpperCase();
+    hist.push(c); hIdx = hist.length;
+    $('cmdIn').value = '';
+    try { await S.dev.cmd(c); } catch (e) { /* already logged */ }
+  };
+  $('btnSend').onclick = send;
+  $('cmdIn').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') send();
+    else if (e.key === 'ArrowUp') { if (hIdx > 0) $('cmdIn').value = hist[--hIdx]; e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { if (hIdx < hist.length - 1) $('cmdIn').value = hist[++hIdx]; else { hIdx = hist.length; $('cmdIn').value = ''; } e.preventDefault(); }
+  });
+  const quick = [['$II', 'Instrument info'], ['$HI', 'Head info'], ['$VE', 'Version'], ['$HT', 'Head type'], ['$SU', 'Units'], ['$SP', 'Send power'], ['$SE', 'Send energy'],
+    ['$AW', 'All wavelengths'], ['$AR', 'All ranges'], ['$AQ', 'Averaging'], ['$FQ', 'Filter'], ['$MM', 'Meas. mode'], ['$BC', 'Battery']];
+  for (const [c, t] of quick) {
+    const b = document.createElement('button');
+    b.className = 'sm chip mono'; b.textContent = c; b.title = t;
+    b.onclick = () => { if (S.dev) S.dev.cmd(c).catch(() => {}); else toast('Not connected', true); };
+    $('quickCmds').appendChild(b);
+  }
+  $('btnLogClear').onclick = () => ($('log').innerHTML = '');
+
+  // display / plot
+  $('btnPause').onclick = togglePause;
+  $('btnAutoscale').onclick = resetScale;
+  document.querySelectorAll('.wq').forEach((b) => (b.onclick = () => { $('windowSec').value = b.dataset.w; syncWindowButtons(); savePrefs(); dirty = true; }));
+  $('digitsRange').oninput = () => { $('digitsTxt').textContent = $('digitsRange').value; };
+  $('yMode').onchange = () => { resetScale(); $('yManualRow').style.display = $('yMode').value === 'manual' ? '' : 'none'; };
+  $('theme').onchange = () => { document.documentElement.dataset.theme = $('theme').value; dirty = true; };
+  $('displayMode').onchange = () => { resetScale(); $('logScale').disabled = $('displayMode').value !== 'abs'; };
+  $('logScale').onchange = resetScale;
+  ['attDb', 'calFactor'].forEach((id) => $(id).addEventListener('change', () => { toast('Correction applies to new samples'); }));
+
+  // stats / reference
+  $('btnStatsReset').onclick = resetStats;
+  $('btnRefCur').onclick = () => { const v = (+$('smoothN').value > 1) ? smoothed(+$('smoothN').value) : S.last; if (isFinite(v) && v) { S.ref = v; toast('Reference = ' + fmtAbs(v)); resetScale(); } else toast('No valid reading', true); };
+  $('btnRefMean').onclick = () => { if (S.stats.n) { S.ref = S.stats.mean; toast('Reference = ' + fmtAbs(S.ref)); resetScale(); } else toast('No statistics yet', true); };
+  $('btnRefClr').onclick = () => { S.ref = null; resetScale(); };
+  $('btnRefSet').onclick = () => { const v = parseSI($('refManual').value); if (isFinite(v) && v > 0) { S.ref = v; resetScale(); } else toast('Invalid reference value', true); };
+
+  // data
+  $('btnCsv').onclick = exportCsv;
+  $('btnJson').onclick = exportJson;
+  $('btnPng').onclick = exportPng;
+  $('btnClear').onclick = () => { if (S.t.length && !confirm(`Delete ${S.t.length} stored points?`)) return; S.t = []; S.v = []; resetStats(); resetScale(); };
+
+  // persist everything & redraw on any control change
+  for (const id of PREF_IDS) { const el = $(id); if (el) el.addEventListener('change', () => { savePrefs(); dirty = true; }); }
+  document.querySelectorAll('aside input, aside select').forEach((el) => el.addEventListener('input', () => (dirty = true)));
+  $('term').addEventListener('change', () => { if (S.dev) S.dev.term = $('term').value.replace('\\r', '\r').replace('\\n', '\n'); });
+  $('timeout').addEventListener('change', () => { if (S.dev) S.dev.timeout = +$('timeout').value || 1000; });
+  ['dtr', 'rts'].forEach((id) => $(id).addEventListener('change', () => { if (S.transport) S.transport.setSignals({ dataTerminalReady: $('dtr').checked, requestToSend: $('rts').checked }); }));
+
+  // keyboard shortcuts (ignored while typing)
+  document.addEventListener('keydown', (e) => {
+    if (e.target.closest('input, select, textarea') || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space') { e.preventDefault(); if (S.acquiring) stopAcq(); else startAcq(); }
+    else if (e.key === 'p' || e.key === 'P') togglePause();
+    else if (e.key === 'r' || e.key === 'R') resetStats();
+    else if (e.key === 'z' || e.key === 'Z') $('btnRefCur').click();
+  });
+
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('connect', () => refreshPorts());
+    navigator.serial.addEventListener('disconnect', (e) => { if (e.target === S.port) onLostConnection(); refreshPorts(); });
+  }
+  window.addEventListener('resize', () => document.documentElement.style.setProperty('--hdr', $('hdr').offsetHeight + 'px'));
+  new ResizeObserver(() => document.documentElement.style.setProperty('--hdr', $('hdr').offsetHeight + 'px')).observe($('hdr'));
+}
+function togglePause() {
+  S.pausedPlot = !S.pausedPlot;
+  S.pauseT = Date.now();
+  $('btnPause').classList.toggle('active', S.pausedPlot);
+  $('btnPause').textContent = S.pausedPlot ? '▶ Resume plot' : '❚❚ Pause plot';
+  dirty = true;
+}
+function resetStats() { S.stats = newStats(); S.rateWin = []; dirty = true; }
+
+/* =====================================================================
+   Init
+   ===================================================================== */
+(function init() {
+  if (!('serial' in navigator)) { $('nosupport').classList.add('show'); $('simMode').checked = true; }
+  loadPrefs();
+  if (!('serial' in navigator)) $('simMode').checked = true;
+  document.documentElement.dataset.theme = $('theme').value;
+  $('digitsTxt').textContent = $('digitsRange').value;
+  $('pollRange').value = Math.min(+$('pollMs').value, 2000);
+  $('yManualRow').style.display = $('yMode').value === 'manual' ? '' : 'none';
+  $('logScale').disabled = $('displayMode').value !== 'abs';
+  bind();
+  syncWindowButtons();
+  updateUiState();
+  refreshPorts();
+  document.documentElement.style.setProperty('--hdr', $('hdr').offsetHeight + 'px');
+  log('info', 'Ready. Choose a port and baud rate, then Connect. Enable Simulation mode (or open with ?demo) to try the UI without a meter.');
+  requestAnimationFrame(frame);
+  if (new URLSearchParams(location.search).has('demo')) { $('simMode').checked = true; updateUiState(); connect(); }
+})();
+</script>
+</body>
+</html>
